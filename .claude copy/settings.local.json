@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(npm install *)",
+      "Bash(npx next *)",
+      "Bash(npm run *)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3000/en)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(curl -s http://localhost:3000/en)",
+      "Read(//tmp/**)",
+      "Bash(grep -oE \"MISSING_MESSAGE[^\\\\\"<]{0,120}|IntlError[^\\\\\"<]{0,120}\" /tmp/home.html)",
+      "Bash(curl -s http://localhost:3000/ar)",
+      "Bash(grep -oE \"MISSING_MESSAGE[^\\\\\"<]{0,120}|IntlError[^\\\\\"<]{0,120}\" /tmp/home-ar.html)",
+      "Bash(curl -s -o /dev/null -w \"AR %{http_code} %{size_download}b\\\\n\" http://localhost:3000/ar)",
+      "Bash(curl -sL http://localhost:3000/)",
+      "Bash(curl -sL -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(curl -sL -o /dev/null -w \"AR %{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(curl -s -o /dev/null -w \"EN %{http_code}\\\\n\" http://localhost:3000/en)",
+      "Bash(curl -s -o /dev/null -w \"Products %{http_code}\\\\n\" http://localhost:3000/en/products)",
+      "Bash(curl -s -o /dev/null -w \"Contact %{http_code}\\\\n\" http://localhost:3000/en/contact)",
+      "Bash(curl -s -o /dev/null -w \"AR %{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(curl -sS -o /dev/null -w \"AR %{http_code}\\\\nEN %{http_code}\\\\nContact %{http_code}\\\\n\" http://localhost:3000/ -w \"EN %{http_code}\\\\n\" http://localhost:3000/en)",
+      "Bash(curl -sS -o /dev/null -w \"home %{http_code}\\\\n\" http://localhost:3000/en)",
+      "Bash(curl -sS --max-time 30 -o /dev/null -w \"home=%{http_code} time=%{time_total}s\\\\n\" http://localhost:3000/en)",
+      "Bash(curl -sS --max-time 30 http://localhost:3000/en)",
+      "Bash(grep -oE \"Error[^<]{0,300}|error[^<]{0,300}|stack[^<]{0,300}|hash[^<]{0,300}|next-error[^\\\\\"<]{0,120}\")",
+      "Bash(curl -sS --max-time 20 -o /dev/null -w \"EN %{http_code}\\\\n\" http://localhost:3000/en)",
+      "Bash(curl -sS --max-time 15 -o /dev/null -w \"AR %{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(curl -sS --max-time 15 -o /dev/null -w \"EN %{http_code}\\\\n\" http://localhost:3000/en)",
+      "Bash(curl -sS --max-time 15 -o /dev/null -w \"Contact %{http_code}\\\\n\" http://localhost:3000/en/contact)",
+      "Bash(curl -sS --max-time 15 -o /dev/null -w \"Products %{http_code}\\\\n\" http://localhost:3000/en/products)",
+      "Bash(curl -sS --max-time 15 http://localhost:3000/en)",
+      "Bash(grep -oE \"MISSING_MESSAGE[^\\\\\"<]{0,120}|IntlError[^\\\\\"<]{0,120}\" d:/Projects/RedSeaSalt/RedSeaSalt/.tmp-home.html)",
+      "Bash(node -e \"console.log\\(require\\('@supabase/supabase-js'\\) ? 'has-supabase-js' : 'no'\\)\")",
+      "Bash(node *)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
+    ]
+  }
+}
