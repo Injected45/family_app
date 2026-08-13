@@ -1351,6 +1351,78 @@ abstract class L {
   /// **'لا توجد تغييرات'**
   String get noChanges;
 
+  /// No description provided for @dangerZoneSection.
+  ///
+  /// In ar, this message translates to:
+  /// **'منطقة الخطر'**
+  String get dangerZoneSection;
+
+  /// No description provided for @purgeTitle.
+  ///
+  /// In ar, this message translates to:
+  /// **'مسح البيانات المالية'**
+  String get purgeTitle;
+
+  /// No description provided for @purgeIntro.
+  ///
+  /// In ar, this message translates to:
+  /// **'يحذف نهائياً كل الاستحقاقات والتحصيلات وحركات الخزينة وسجل العمليات. يُستعمل مرة واحدة لتصفير بيانات التجربة قبل بدء العمل الفعلي.'**
+  String get purgeIntro;
+
+  /// No description provided for @purgeKeeps.
+  ///
+  /// In ar, this message translates to:
+  /// **'لا يُحذف: العائلات والأعضاء وإعدادات الجمعية وحسابات المستخدمين.'**
+  String get purgeKeeps;
+
+  /// No description provided for @purgeIrreversible.
+  ///
+  /// In ar, this message translates to:
+  /// **'لا يمكن التراجع عن هذه العملية، ولا يبقى منها أثر في سجل العمليات.'**
+  String get purgeIrreversible;
+
+  /// No description provided for @purgeButton.
+  ///
+  /// In ar, this message translates to:
+  /// **'مسح البيانات المالية'**
+  String get purgeButton;
+
+  /// No description provided for @purgeConfirmTitle.
+  ///
+  /// In ar, this message translates to:
+  /// **'مسح نهائي للبيانات المالية'**
+  String get purgeConfirmTitle;
+
+  /// No description provided for @purgeConfirmPrompt.
+  ///
+  /// In ar, this message translates to:
+  /// **'للتأكيد، اكتب: {phrase}'**
+  String purgeConfirmPrompt(String phrase);
+
+  /// No description provided for @purgeConfirmField.
+  ///
+  /// In ar, this message translates to:
+  /// **'عبارة التأكيد'**
+  String get purgeConfirmField;
+
+  /// No description provided for @purgeConfirmAction.
+  ///
+  /// In ar, this message translates to:
+  /// **'مسح نهائي'**
+  String get purgeConfirmAction;
+
+  /// No description provided for @purgeDone.
+  ///
+  /// In ar, this message translates to:
+  /// **'تم مسح {count} سجل، وأصبح الترقيم يبدأ من جديد'**
+  String purgeDone(int count);
+
+  /// No description provided for @purgeNothingToDo.
+  ///
+  /// In ar, this message translates to:
+  /// **'لا توجد بيانات مالية لمسحها'**
+  String get purgeNothingToDo;
+
   /// No description provided for @usersIntro.
   ///
   /// In ar, this message translates to:

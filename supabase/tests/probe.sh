@@ -15,7 +15,7 @@ export SP
 
 # How many checks the suite must record. A mismatch fails, so a check whose SQL
 # errors before recording anything cannot hide.
-EXPECTED_CHECKS=179
+EXPECTED_CHECKS=204
 
 run() {
   "$PSQL" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d famtest -X -q -v ON_ERROR_STOP=1 "$@"
@@ -50,6 +50,11 @@ run -f "$HERE/50_money_and_atomicity.sql" 2>&1 | grep -vE '^(CREATE|SET|RESET|DR
 
 echo "=== concurrency (two sessions) ==="
 bash "$HERE/60_concurrency.sh"
+
+# LAST, and it has to be: the purge erases everything the four files above built,
+# so any group scheduled after it would assert against an empty database.
+echo "=== purge (destructive — erases the fixture) ==="
+run -f "$HERE/70_purge.sql"          2>&1 | grep -vE '^(INSERT|DELETE|SELECT|SET|RESET|CREATE) ' || true
 
 echo
 echo "=== report ==="

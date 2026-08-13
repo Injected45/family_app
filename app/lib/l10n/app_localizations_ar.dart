@@ -687,6 +687,49 @@ class LAr extends L {
   String get noChanges => 'لا توجد تغييرات';
 
   @override
+  String get dangerZoneSection => 'منطقة الخطر';
+
+  @override
+  String get purgeTitle => 'مسح البيانات المالية';
+
+  @override
+  String get purgeIntro =>
+      'يحذف نهائياً كل الاستحقاقات والتحصيلات وحركات الخزينة وسجل العمليات. يُستعمل مرة واحدة لتصفير بيانات التجربة قبل بدء العمل الفعلي.';
+
+  @override
+  String get purgeKeeps =>
+      'لا يُحذف: العائلات والأعضاء وإعدادات الجمعية وحسابات المستخدمين.';
+
+  @override
+  String get purgeIrreversible =>
+      'لا يمكن التراجع عن هذه العملية، ولا يبقى منها أثر في سجل العمليات.';
+
+  @override
+  String get purgeButton => 'مسح البيانات المالية';
+
+  @override
+  String get purgeConfirmTitle => 'مسح نهائي للبيانات المالية';
+
+  @override
+  String purgeConfirmPrompt(String phrase) {
+    return 'للتأكيد، اكتب: $phrase';
+  }
+
+  @override
+  String get purgeConfirmField => 'عبارة التأكيد';
+
+  @override
+  String get purgeConfirmAction => 'مسح نهائي';
+
+  @override
+  String purgeDone(int count) {
+    return 'تم مسح $count سجل، وأصبح الترقيم يبدأ من جديد';
+  }
+
+  @override
+  String get purgeNothingToDo => 'لا توجد بيانات مالية لمسحها';
+
+  @override
   String get usersIntro => 'اعتماد الحسابات الجديدة وإدارة الصلاحيات.';
 
   @override

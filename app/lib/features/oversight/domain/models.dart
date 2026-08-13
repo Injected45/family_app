@@ -366,6 +366,48 @@ class EditableSettings {
       );
 }
 
+/// What `purge_financial_data` reports it erased.
+///
+/// Counts, not money, so `_int` is right here — these are the only numbers in
+/// the app that legitimately arrive as JSON numbers rather than text.
+class PurgeResult {
+  const PurgeResult({
+    required this.receivables,
+    required this.receivableLines,
+    required this.payments,
+    required this.allocations,
+    required this.cashMovements,
+    required this.auditEntries,
+  });
+
+  final int receivables;
+  final int receivableLines;
+  final int payments;
+  final int allocations;
+  final int cashMovements;
+  final int auditEntries;
+
+  /// Every row the purge removed, for the one-line confirmation the screen
+  /// shows. The six figures are kept separately because an admin who purged by
+  /// accident will want to know exactly what went.
+  int get total =>
+      receivables +
+      receivableLines +
+      payments +
+      allocations +
+      cashMovements +
+      auditEntries;
+
+  factory PurgeResult.fromJson(Map<String, dynamic> json) => PurgeResult(
+    receivables: _int(json['receivables']),
+    receivableLines: _int(json['receivableLines']),
+    payments: _int(json['payments']),
+    allocations: _int(json['allocations']),
+    cashMovements: _int(json['cashMovements']),
+    auditEntries: _int(json['auditEntries']),
+  );
+}
+
 /// One member as the family form submits it.
 class MemberInput {
   const MemberInput({

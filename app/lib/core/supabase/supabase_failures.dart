@@ -65,6 +65,7 @@ abstract final class SupabaseFailures {
     'RUL09': 409, // cancellation and no-delete guards
     'RUL10': 422, // national id / date of birth
     'RUL12': 409, // audit log is append-only
+    'RUL13': 422, // purge confirmation phrase did not match
   };
 
   static ApiException _fromPostgrest(PostgrestException error) {

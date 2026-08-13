@@ -123,7 +123,14 @@ if defined DEVICE (
 REM ---- Otherwise start one --------------------------------------------------
 if not defined AVD (
   call flutter emulators > "%AVDLIST%" 2>nul
-  for /f "tokens=1" %%A in ('findstr /r /c:"  android" "%AVDLIST%"') do (
+  REM Pick the first Android AVD. `flutter emulators` prints rows as
+  REM   <id> * <name> * <manufacturer> * android
+  REM ( * is a bullet ) and the platform column is preceded by a SINGLE space.
+  REM The old pattern "  android" (two spaces) matched nothing after a flutter
+  REM update, so no AVD was ever chosen and this script wrongly reported that
+  REM none existed. Anchor on a row that STARTS with an id token and lists the
+  REM android platform, which also skips the header, blanks and the help URLs.
+  for /f "tokens=1" %%A in ('findstr /r /c:"^[A-Za-z0-9_].* android" "%AVDLIST%"') do (
     if not defined AVD set "AVD=%%A"
   )
 )

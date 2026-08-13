@@ -91,11 +91,12 @@ BEGIN
    WHERE n.nspname = 'public'
      AND p.proname IN ('register_payment','cancel_payment','generate_period',
                        'auto_close_periods','save_family','update_settings',
-                       'set_user_access','api_dashboard','api_family_detail',
-                       'api_family_statement','api_receivables','api_alerts',
-                       'api_financial_report','api_settings','api_me');
-  IF v_funcs <> 15 THEN
-    RAISE EXCEPTION 'expected 15 API functions, found %', v_funcs;
+                       'set_user_access','purge_financial_data','api_dashboard',
+                       'api_family_detail','api_family_statement',
+                       'api_receivables','api_alerts','api_financial_report',
+                       'api_settings','api_me');
+  IF v_funcs <> 16 THEN
+    RAISE EXCEPTION 'expected 16 API functions, found %', v_funcs;
   END IF;
 
   -- Every table must have RLS ON. A table without it is readable by anyone

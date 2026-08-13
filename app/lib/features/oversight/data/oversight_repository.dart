@@ -128,6 +128,21 @@ class OversightRepository {
     return const <String>[];
   });
 
+  /// Erases every receivable, payment, allocation, cash movement and audit
+  /// entry. Families, members, settings and accounts survive.
+  ///
+  /// `confirm` must be [PurgeWire.confirmPhrase] verbatim — the function checks
+  /// it server-side and raises RUL13 otherwise, so the dialog's own check is a
+  /// courtesy, not the gate. Same reasoning as every role check in the app.
+  Future<PurgeResult> purgeFinancialData({required String confirm}) =>
+      SupabaseFailures.guard(() async {
+        final dynamic payload = await _db.rpc<dynamic>(
+          'purge_financial_data',
+          params: <String, dynamic>{'p_confirm': confirm},
+        );
+        return PurgeResult.fromJson(_obj(payload));
+      });
+
   Future<int> createFamily({
     required MemberInput father,
     required List<MemberInput> sons,

@@ -693,6 +693,49 @@ class LEn extends L {
   String get noChanges => 'No changes';
 
   @override
+  String get dangerZoneSection => 'Danger zone';
+
+  @override
+  String get purgeTitle => 'Erase financial data';
+
+  @override
+  String get purgeIntro =>
+      'Permanently deletes every receivable, payment, cash movement and audit entry. Intended to be used once, to clear trial figures before going live.';
+
+  @override
+  String get purgeKeeps =>
+      'Kept: families, members, association settings and user accounts.';
+
+  @override
+  String get purgeIrreversible =>
+      'This cannot be undone, and no trace of it is left in the audit trail.';
+
+  @override
+  String get purgeButton => 'Erase financial data';
+
+  @override
+  String get purgeConfirmTitle => 'Permanently erase financial data';
+
+  @override
+  String purgeConfirmPrompt(String phrase) {
+    return 'To confirm, type: $phrase';
+  }
+
+  @override
+  String get purgeConfirmField => 'Confirmation phrase';
+
+  @override
+  String get purgeConfirmAction => 'Erase permanently';
+
+  @override
+  String purgeDone(int count) {
+    return 'Erased $count rows; numbering starts over';
+  }
+
+  @override
+  String get purgeNothingToDo => 'There is no financial data to erase';
+
+  @override
   String get usersIntro => 'Approve new accounts and manage permissions.';
 
   @override

@@ -4,12 +4,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/config/glass.dart';
 import '../../../core/config/theme.dart';
+import '../../../core/domain/wire_values.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/router/destinations.dart';
 import '../../../core/widgets/app_scaffold.dart';
 import '../../../core/widgets/async_view.dart';
 import '../../../l10n/app_localizations.dart';
+import '../../auth/domain/app_user.dart';
+import '../../auth/presentation/auth_controller.dart';
 import '../../directory/presentation/providers.dart' as directory;
+import '../../finance/presentation/providers.dart' as finance;
 import '../domain/models.dart';
 import 'providers.dart';
 
@@ -275,6 +279,227 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
                 )
               : const Icon(Icons.save_outlined, size: 18),
           label: Text(l.save),
+        ),
+
+        // Admin-only, and last on the page on purpose: it is the one control
+        // here that destroys rather than configures. The database repeats the
+        // same role check, so hiding it is presentation only.
+        if ((ref.watch(authControllerProvider).user?.role ?? AppRole.viewer)
+            .atLeast(AppRole.admin)) ...<Widget>[
+          const SizedBox(height: AppSpacing.xl * 2),
+          const _DangerZone(),
+        ],
+      ],
+    );
+  }
+}
+
+/// Settings → منطقة الخطر. Calls `purge_financial_data`, which erases every
+/// receivable, payment, cash movement and audit entry and leaves the directory,
+/// the settings and the accounts alone.
+class _DangerZone extends ConsumerStatefulWidget {
+  const _DangerZone();
+
+  @override
+  ConsumerState<_DangerZone> createState() => _DangerZoneState();
+}
+
+class _DangerZoneState extends ConsumerState<_DangerZone> {
+  bool _purging = false;
+
+  Future<void> _purge(L l) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      // The phrase must be typed even to dismiss by accident, so tapping the
+      // scrim cannot be mistaken for either answer.
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => const _PurgeConfirmDialog(),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _purging = true);
+    try {
+      final PurgeResult result = await ref
+          .read(oversightRepositoryProvider)
+          .purgeFinancialData(confirm: PurgeWire.confirmPhrase);
+
+      // Every screen that reads money is now stale. Invalidating the families
+      // provider too is not redundant: the list carries each family's debt.
+      ref.invalidate(dashboardProvider);
+      ref.invalidate(alertsProvider);
+      ref.invalidate(auditProvider);
+      ref.invalidate(reportProvider);
+      ref.invalidate(directory.familiesProvider);
+      ref.invalidate(directory.familyDetailProvider);
+      ref.invalidate(directory.statementProvider);
+      ref.invalidate(directory.receivablesProvider);
+      ref.invalidate(finance.paymentsProvider);
+      ref.invalidate(finance.cashSummaryProvider);
+      ref.invalidate(finance.cashMovementsProvider);
+
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            result.total == 0 ? l.purgeNothingToDo : l.purgeDone(result.total),
+          ),
+        ),
+      );
+    } on ApiException catch (failure) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(describeApiFailure(l, failure))),
+      );
+    } finally {
+      if (mounted) setState(() => _purging = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final L l = L.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _Section(title: l.dangerZoneSection),
+        Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            color: AppColors.dangerSoft,
+            borderRadius: BorderRadius.circular(AppRadius.control),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                l.purgeTitle,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.danger,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                l.purgeIntro,
+                style: const TextStyle(fontSize: 12, height: 1.6),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                l.purgeKeeps,
+                style: const TextStyle(fontSize: 12, height: 1.6),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                l.purgeIrreversible,
+                style: const TextStyle(
+                  fontSize: 12,
+                  height: 1.6,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.danger,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              FilledButton.icon(
+                onPressed: _purging ? null : () => _purge(l),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.danger,
+                  foregroundColor: AppColors.onFill,
+                ),
+                icon: _purging
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.onFill,
+                        ),
+                      )
+                    : const Icon(Icons.delete_forever_outlined, size: 18),
+                label: Text(l.purgeButton),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Type-the-phrase confirmation.
+///
+/// The button stays disabled until the field matches [PurgeWire.confirmPhrase]
+/// exactly, which is the same string `purge_financial_data` checks server-side.
+/// Enforcing it here as well is not belt-and-braces for its own sake — it is what
+/// makes the refusal instant and legible instead of a round trip that returns
+/// RUL13.
+class _PurgeConfirmDialog extends StatefulWidget {
+  const _PurgeConfirmDialog();
+
+  @override
+  State<_PurgeConfirmDialog> createState() => _PurgeConfirmDialogState();
+}
+
+class _PurgeConfirmDialogState extends State<_PurgeConfirmDialog> {
+  final TextEditingController _typed = TextEditingController();
+
+  @override
+  void dispose() {
+    _typed.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final L l = L.of(context);
+    final bool matches = _typed.text.trim() == PurgeWire.confirmPhrase;
+
+    return GlassDialog(
+      title: Text(l.purgeConfirmTitle),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(l.purgeIntro, style: const TextStyle(fontSize: 12, height: 1.6)),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            l.purgeIrreversible,
+            style: const TextStyle(
+              fontSize: 12,
+              height: 1.6,
+              fontWeight: FontWeight.w700,
+              color: AppColors.danger,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            l.purgeConfirmPrompt(PurgeWire.confirmPhrase),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          TextField(
+            controller: _typed,
+            autofocus: true,
+            onChanged: (String _) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: l.purgeConfirmField,
+              isDense: true,
+            ),
+          ),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(l.cancel),
+        ),
+        FilledButton(
+          onPressed: matches ? () => Navigator.of(context).pop(true) : null,
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.danger,
+            foregroundColor: AppColors.onFill,
+          ),
+          child: Text(l.purgeConfirmAction),
         ),
       ],
     );

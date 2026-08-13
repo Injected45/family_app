@@ -45,7 +45,7 @@ RETURNS text[] LANGUAGE sql IMMUTABLE AS $$
     'my_role()',
     'has_role(app_role)',
 
-    -- Writes. Seven functions, each require_role()-gated, each one transaction.
+    -- Writes. Eight functions, each require_role()-gated, each one transaction.
     'register_payment(bigint,numeric,pay_method,text,text,text)',
     'cancel_payment(bigint,text)',
     'generate_period(character)',
@@ -53,6 +53,11 @@ RETURNS text[] LANGUAGE sql IMMUTABLE AS $$
     'save_family(bigint,jsonb,jsonb)',
     'update_settings(jsonb)',
     'set_user_access(uuid,app_role,app_status)',
+    -- The destructive one. admin-only, and refuses without the typed phrase.
+    -- It is on the list because Settings calls it directly; the reason it is
+    -- safe to expose is the same reason the other seven are — the gate is
+    -- inside the body, not in who can reach it.
+    'purge_financial_data(text)',
 
     -- Reads. STABLE and SECURITY INVOKER, so RLS still decides what they return.
     'period_label(text)',

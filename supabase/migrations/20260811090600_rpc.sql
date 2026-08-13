@@ -524,6 +524,95 @@ BEGIN
                             'role', v_row.role, 'status', v_row.status);
 END $$;
 
+-- ═════════════════════════════════════════════════════════════════════════════
+-- Purge — the ONE deliberate exception to rule 9, and the only way to erase
+-- financial history. Settings → منطقة الخطر calls it.
+--
+-- WHY IT EXISTS: the association trials the app with practice figures before it
+-- goes live. Cancelling every payment (rule 9's supported path) leaves the
+-- practice rows on screen struck through forever, so there had to be a way to
+-- actually start from zero.
+--
+-- WHY TRUNCATE AND NOT DELETE: the five financial tables carry BEFORE DELETE
+-- triggers (refuse_delete) and audit_log carries refuse_audit_change. TRUNCATE
+-- fires neither — only AFTER TRUNCATE statement triggers, and none are defined.
+-- The alternative was ALTER TABLE … DISABLE TRIGGER around the DELETEs, which
+-- takes the same ACCESS EXCLUSIVE lock but leaves a window in which the rule-9
+-- guard is genuinely off. TRUNCATE never disarms anything, so a failure here
+-- cannot leave the table unprotected. It also resets the identity sequences,
+-- which is what makes the next receipt PAY-000001 instead of continuing the
+-- practice run's numbering.
+--
+-- So rule 9 now reads: nothing can be hard-deleted except through this function,
+-- which is admin-only, demands a typed confirmation, and is one transaction.
+-- `authenticated` holds no TRUNCATE privilege on any table (see
+-- 20260811091200_function_lockdown.sql), so this really is the only route.
+--
+-- WHAT SURVIVES: families, members, association_settings, profiles. The purge is
+-- financial only — the directory is what the association spent the most effort
+-- entering, and rebuilding it is not what "clear the figures" means.
+--
+-- WHAT DOES NOT: audit_log is truncated too, and NO entry is written afterwards.
+-- That is a deliberate choice by the association's admin, and it is worth being
+-- explicit about the cost: rule 12 makes the trail append-only precisely so an
+-- administrator cannot quietly rewrite history, and this function is a hole in
+-- that. After it runs there is no record inside the database that it ran, or of
+-- anything that preceded it. If that is ever regretted, the fix is one line —
+-- move the audit_log truncate out and write a 'data.purge' entry at the end.
+--
+-- No ordering hazard in the TRUNCATE list: every FK pointing INTO these six
+-- tables originates in one of the six, so Postgres does not demand CASCADE.
+-- Adding a seventh table that references payments without listing it here would
+-- fail loudly rather than silently skip.
+-- ═════════════════════════════════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION public.purge_financial_data(p_confirm text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth AS $$
+DECLARE
+  v_recv  bigint;
+  v_lines bigint;
+  v_pay   bigint;
+  v_alloc bigint;
+  v_cash  bigint;
+  v_audit bigint;
+BEGIN
+  PERFORM public.require_role('admin');
+
+  -- The typed phrase. Not UX politeness: register_payment and save_family are
+  -- reachable by anyone who can read the anon key out of the APK, and so is
+  -- this. require_role stops a treasurer; the phrase stops an admin's own
+  -- mis-click and a replayed request. It must match wire_values.dart exactly.
+  IF btrim(coalesce(p_confirm, '')) <> 'مسح نهائي' THEN
+    RAISE EXCEPTION 'عبارة التأكيد غير مطابقة، لم يتم حذف أي شيء'
+      USING ERRCODE = 'RUL13';
+  END IF;
+
+  -- Counted before, because TRUNCATE reports no row count. These tables are
+  -- small enough that six counts cost nothing next to the truncate itself.
+  SELECT count(*) INTO v_recv  FROM public.receivables;
+  SELECT count(*) INTO v_lines FROM public.receivable_lines;
+  SELECT count(*) INTO v_pay   FROM public.payments;
+  SELECT count(*) INTO v_alloc FROM public.payment_allocations;
+  SELECT count(*) INTO v_cash  FROM public.cash_movements;
+  SELECT count(*) INTO v_audit FROM public.audit_log;
+
+  TRUNCATE public.payment_allocations,
+           public.cash_movements,
+           public.payments,
+           public.receivable_lines,
+           public.receivables,
+           public.audit_log
+    RESTART IDENTITY;
+
+  RETURN jsonb_build_object(
+    'receivables',     v_recv,
+    'receivableLines', v_lines,
+    'payments',        v_pay,
+    'allocations',     v_alloc,
+    'cashMovements',   v_cash,
+    'auditEntries',    v_audit);
+END $$;
+
 -- ── Execution grants ─────────────────────────────────────────────────────────
 -- Every function re-checks the role internally, so granting EXECUTE broadly to
 -- authenticated is safe: a viewer calling register_payment gets RUL00, not a row.
@@ -534,7 +623,8 @@ GRANT EXECUTE ON FUNCTION
   public.auto_close_periods(),
   public.save_family(bigint, jsonb, jsonb),
   public.update_settings(jsonb),
-  public.set_user_access(uuid, app_role, app_status)
+  public.set_user_access(uuid, app_role, app_status),
+  public.purge_financial_data(text)
 TO authenticated;
 
 -- write_audit is NOT granted: it is an internal helper. Exposing it would let

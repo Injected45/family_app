@@ -45,6 +45,17 @@ abstract final class MemberDefaults {
   static const String status = MembershipStatusWire.active;
 }
 
+abstract final class PurgeWire {
+  /// The phrase `purge_financial_data(p_confirm)` compares against before it
+  /// truncates anything, byte for byte.
+  ///
+  /// A wire value, not a caption: the settings dialog shows it as the text to
+  /// copy, but what makes it belong here is that the database holds the same
+  /// literal. Changing the wording on the screen alone would leave an admin
+  /// typing exactly what he was asked for and being refused.
+  static const String confirmPhrase = 'مسح نهائي';
+}
+
 abstract final class ArabicPunctuation {
   /// U+060C, the Arabic comma. Joining a list with a Latin ',' looks wrong in
   /// Arabic text and is what the prototype uses throughout.
