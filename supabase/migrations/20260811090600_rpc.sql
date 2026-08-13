@@ -671,15 +671,40 @@ BEGIN
   SELECT count(*) INTO v_fam    FROM public.families;
   SELECT count(*) INTO v_mem    FROM public.members;
 
+  -- ── Why families and members are DELETEd while the six financial tables are
+  -- TRUNCATEd ────────────────────────────────────────────────────────────────
+  -- profiles.family_id references families, and TRUNCATE refuses whenever ANY
+  -- table outside its list carries a foreign key into one being truncated —
+  -- the constraint's existence is what it checks, not whether rows remain. So
+  -- emptying profiles first does not help: it still dies with 0A000 "cannot
+  -- truncate a table referenced in a foreign key constraint". Listing profiles
+  -- would delete the association's own staff accounts, and CASCADE would do the
+  -- same silently.
+  --
+  -- DELETE has no such rule, and neither families nor members carries a
+  -- refuse_delete trigger — that guard is on the five financial tables, which
+  -- keep their TRUNCATE. The identities are then restarted by hand, because
+  -- that is the part RESTART IDENTITY was doing and the reason the next family
+  -- must be F-0001.
+  --
+  -- Heads of family go first and go entirely: their family is being erased, so
+  -- leaving the profile would leave a dangling scope. auth.users survives, so
+  -- the same person can sign in again and redeem a fresh code later.
+  DELETE FROM public.profiles WHERE family_id IS NOT NULL;
+
   TRUNCATE public.payment_allocations,
            public.cash_movements,
            public.payments,
            public.receivable_lines,
            public.receivables,
-           public.audit_log,
-           public.members,
-           public.families
+           public.audit_log
     RESTART IDENTITY;
+
+  DELETE FROM public.members;
+  DELETE FROM public.families;
+
+  ALTER TABLE public.members  ALTER COLUMN id RESTART WITH 1;
+  ALTER TABLE public.families ALTER COLUMN id RESTART WITH 1;
 
   RETURN jsonb_build_object(
     'receivables',     v_recv,
@@ -690,6 +715,141 @@ BEGIN
     'auditEntries',    v_audit,
     'families',        v_fam,
     'members',         v_mem);
+END $$;
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- The family portal — issuing and redeeming an access code.
+--
+-- Two functions, and the split between them is the security boundary: an admin
+-- CREATES a code for a family, and the head of family REDEEMS it for himself.
+-- Nobody can do both halves, and no client ever writes profiles.family_id
+-- directly — `authenticated` holds no UPDATE on profiles at all.
+-- ═════════════════════════════════════════════════════════════════════════════
+
+-- Endpoint: POST /families/:id/access-code.  Generates, or regenerates.
+--
+-- Regenerating REVOKES the previous code (one row per family, overwritten) but
+-- does NOT sign out a head of family who already redeemed it: the binding lives
+-- on profiles.family_id from that moment on. So an admin can reissue freely when
+-- a WhatsApp message is lost, without breaking anybody.
+--
+-- The alphabet omits 0/O/1/I/L/U — the pairs a person mis-reads off a phone
+-- screen, and U so no random draw can spell something unfortunate. 27 letters,
+-- 12 characters, ~57 bits: not guessable over HTTPS, and readable aloud.
+CREATE OR REPLACE FUNCTION public.issue_family_code(p_family_id bigint)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth AS $$
+DECLARE
+  v_alphabet CONSTANT text := '23456789ABCDEFGHJKMNPQRSTVWXYZ';
+  v_code text := '';
+  v_code_fmt text;
+  v_family record;
+  i int;
+BEGIN
+  PERFORM public.require_role('admin');
+
+  SELECT id, family_code INTO v_family FROM public.families WHERE id = p_family_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'FAMILY_NOT_FOUND' USING ERRCODE = 'RUL14';
+  END IF;
+
+  FOR i IN 1..12 LOOP
+    -- random() is not cryptographic. It does not need to be: the row is written
+    -- under a UNIQUE constraint, the code is delivered out of band, and the
+    -- worst case for a predicted code is read-only sight of one family's own
+    -- figures. gen_random_bytes would drag in pgcrypto for that.
+    v_code := v_code || substr(v_alphabet, 1 + floor(random() * length(v_alphabet))::int, 1);
+  END LOOP;
+
+  -- Grouped for reading aloud. redeem_family_code strips the dashes back out,
+  -- so what the admin sees and what the head of family types are the same thing.
+  v_code_fmt := substr(v_code,1,4) || '-' || substr(v_code,5,4) || '-' || substr(v_code,9,4);
+
+  INSERT INTO public.family_access_codes (family_id, code, issued_by)
+  VALUES (p_family_id, v_code, auth.uid())
+  ON CONFLICT (family_id) DO UPDATE SET
+    code = excluded.code, issued_at = now(), issued_by = excluded.issued_by,
+    -- Cleared: this is a NEW code, and it has not been redeemed.
+    redeemed_at = NULL, redeemed_by = NULL;
+
+  PERFORM public.write_audit('family.code.issue',
+    format('إصدار رمز دخول للعائلة %s', v_family.family_code), v_family.family_code);
+
+  RETURN jsonb_build_object(
+    'familyId', p_family_id, 'familyCode', v_family.family_code, 'code', v_code_fmt);
+END $$;
+
+-- Endpoint: POST /access-code/redeem.  Called by the head of family himself,
+-- once, right after he signs in with Google.
+--
+-- Binds his profile to the family and approves him. From then on my_role()
+-- returns NULL for him and my_family_id() returns the family, so the RLS
+-- policies in 20260811090500 decide everything he can see — this function is
+-- never consulted again.
+--
+-- It refuses anyone who is already staff. Without that check an admin who typed
+-- a code would set his own family_id, my_role() would start returning NULL, and
+-- he would lock himself out of the association's own app — possibly as the last
+-- admin, which no other guard would catch because his role never changed.
+CREATE OR REPLACE FUNCTION public.redeem_family_code(p_code text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth AS $$
+DECLARE
+  v_norm   text;
+  v_row    record;
+  v_me     record;
+  v_family record;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'يجب تسجيل الدخول أولاً' USING ERRCODE = 'RUL14';
+  END IF;
+
+  SELECT * INTO v_me FROM public.profiles WHERE id = auth.uid();
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'PROFILE_NOT_FOUND' USING ERRCODE = 'RUL14';
+  END IF;
+
+  IF v_me.role <> 'viewer' THEN
+    RAISE EXCEPTION 'هذا الحساب حساب إداري ولا يمكن ربطه بعائلة'
+      USING ERRCODE = 'RUL14';
+  END IF;
+
+  -- Typed by a person off a phone screen: dashes, spaces and lower case are all
+  -- expected and none of them are part of the code.
+  v_norm := upper(regexp_replace(coalesce(p_code, ''), '[^0-9A-Za-z]', '', 'g'));
+
+  SELECT * INTO v_row FROM public.family_access_codes WHERE code = v_norm;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'رمز الدخول غير صحيح' USING ERRCODE = 'RUL14';
+  END IF;
+
+  -- One code, one household. A second person redeeming the same code would get
+  -- his own read-only view of the same family — which is a decision for the
+  -- admin to make by reissuing, not something a forwarded WhatsApp message
+  -- should be able to do.
+  IF v_row.redeemed_at IS NOT NULL AND v_row.redeemed_by IS DISTINCT FROM auth.uid() THEN
+    RAISE EXCEPTION 'هذا الرمز مستعمل بالفعل، اطلب رمزاً جديداً'
+      USING ERRCODE = 'RUL14';
+  END IF;
+
+  UPDATE public.profiles
+     SET family_id = v_row.family_id,
+         status    = 'approved',
+         role      = 'viewer'
+   WHERE id = auth.uid();
+
+  UPDATE public.family_access_codes
+     SET redeemed_at = now(), redeemed_by = auth.uid()
+   WHERE family_id = v_row.family_id;
+
+  SELECT family_code INTO v_family FROM public.families WHERE id = v_row.family_id;
+
+  PERFORM public.write_audit('family.code.redeem',
+    format('ربط حساب %s بالعائلة %s', v_me.email, v_family.family_code),
+    v_family.family_code);
+
+  RETURN jsonb_build_object(
+    'familyId', v_row.family_id, 'familyCode', v_family.family_code);
 END $$;
 
 -- ── Execution grants ─────────────────────────────────────────────────────────
@@ -704,7 +864,9 @@ GRANT EXECUTE ON FUNCTION
   public.update_settings(jsonb),
   public.set_user_access(uuid, app_role, app_status),
   public.purge_financial_data(text),
-  public.purge_all_data(text)
+  public.purge_all_data(text),
+  public.issue_family_code(bigint),
+  public.redeem_family_code(text)
 TO authenticated;
 
 -- write_audit is NOT granted: it is an internal helper. Exposing it would let
