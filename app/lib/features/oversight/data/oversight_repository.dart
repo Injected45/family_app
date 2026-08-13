@@ -143,6 +143,22 @@ class OversightRepository {
         return PurgeResult.fromJson(_obj(payload));
       });
 
+  /// Erases the directory as well: families, members, and — because every
+  /// receivable and receipt references a family with ON DELETE RESTRICT — the
+  /// financial tables too. A superset of [purgeFinancialData], never a
+  /// narrower cousin of it.
+  ///
+  /// `confirm` must be [PurgeWire.confirmPhraseAll], which the financial
+  /// phrase deliberately does not satisfy.
+  Future<PurgeResult> purgeAllData({required String confirm}) =>
+      SupabaseFailures.guard(() async {
+        final dynamic payload = await _db.rpc<dynamic>(
+          'purge_all_data',
+          params: <String, dynamic>{'p_confirm': confirm},
+        );
+        return PurgeResult.fromJson(_obj(payload));
+      });
+
   Future<int> createFamily({
     required MemberInput father,
     required List<MemberInput> sons,

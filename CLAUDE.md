@@ -27,27 +27,39 @@ This dictates the data-access shape — do not deviate from it:
 
 - **Reads** → direct PostgREST against `v_*` views (or `api_*` functions), gated by
   RLS on the caller's role. Never read a base table.
-- **Writes** → only through the eight `SECURITY DEFINER` RPC functions below. The
+- **Writes** → only through the nine `SECURITY DEFINER` RPC functions below. The
   `authenticated` role holds no INSERT/UPDATE/DELETE on any table and no table has a
   write policy, because a payment is not one row — registering it inserts a payment,
   N allocations, N receivable updates, and a cash movement, all-or-nothing. A
   function body is one transaction; a PostgREST call is not.
 
-  The eight RPCs (in `supabase/migrations/…_rpc.sql`): `register_payment`,
+  The nine RPCs (in `supabase/migrations/…_rpc.sql`): `register_payment`,
   `cancel_payment`, `generate_period`, `auto_close_periods`, `save_family`,
-  `update_settings`, `set_user_access`, `purge_financial_data`. (`write_audit`
-  exists but is called by triggers, never the client.)
+  `update_settings`, `set_user_access`, `purge_financial_data`,
+  `purge_all_data`. (`write_audit` exists but is called by triggers, never the
+  client.)
 
-  `purge_financial_data` is the odd one out and the only way to hard-delete
-  anything: admin-only, refuses without the phrase in `PurgeWire.confirmPhrase`,
-  and TRUNCATEs the six financial tables — receivables, receivable_lines,
-  payments, payment_allocations, cash_movements **and audit_log** — with
-  `RESTART IDENTITY`, leaving families, members, settings and profiles alone.
+  The two purges are the odd ones out and the only way to hard-delete anything.
+  Both are admin-only, both TRUNCATE with `RESTART IDENTITY`, and each refuses
+  without its own typed phrase from `PurgeWire` — `مسح نهائي` and
+  `مسح كل البيانات`. Neither phrase satisfies the other function, which is the
+  entire reason there are two rather than one with a flag, and
+  `supabase/tests/70_purge.sql` asserts that in both directions.
+
+  - `purge_financial_data` takes the six financial tables (receivables,
+    receivable_lines, payments, payment_allocations, cash_movements **and
+    audit_log**) and leaves families, members, settings and profiles standing.
+  - `purge_all_data` is a strict SUPERSET: those six plus members and families.
+    It cannot be narrower — every receivable and receipt references a family
+    `ON DELETE RESTRICT`, so the directory cannot go while a receipt survives.
+    Settings and profiles still survive; wiping profiles would strand the
+    association outside its own app.
+
   TRUNCATE rather than DELETE because it fires no `BEFORE DELETE` trigger, so
-  the rule-9 guards never have to be disarmed. It is a deliberate hole in rules
-  9 and 12: after it runs, nothing in the database records that it ran. Settings
-  → منطقة الخطر is the only caller. Probed by `supabase/tests/70_purge.sql`,
-  which runs last because it erases the fixture.
+  the rule-9 guards never have to be disarmed and no code path can leave them
+  off. Both are deliberate holes in rules 9 and 12: after either runs, nothing
+  in the database records that it ran. Settings → منطقة الخطر is the only
+  caller. `70_purge.sql` runs last because it erases the fixture.
 
 - **Money is text end to end.** Postgres serialises `numeric` as a bare JSON number
   and `dart:convert` decodes that to `double`. Every view casts amounts to text, and

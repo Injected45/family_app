@@ -730,6 +730,33 @@ class LAr extends L {
   String get purgeNothingToDo => 'لا توجد بيانات مالية لمسحها';
 
   @override
+  String get purgeAllTitle => 'مسح بيانات العائلات والأعضاء';
+
+  @override
+  String get purgeAllIntro =>
+      'يحذف نهائياً كل العائلات والأعضاء، ومعها كل البيانات المالية. تعود قاعدة البيانات فارغة تماماً كما لو أن النظام لم يُستعمل بعد.';
+
+  @override
+  String get purgeAllWhyFinancial =>
+      'لماذا تُحذف البيانات المالية معها: كل استحقاق وكل إيصال مرتبط بعائلة، فلا يمكن حذف العائلة وإبقاء إيصالها.';
+
+  @override
+  String get purgeAllKeeps =>
+      'لا يُحذف: إعدادات الجمعية وحسابات المستخدمين، فيبقى دخولك للتطبيق كما هو.';
+
+  @override
+  String get purgeAllButton => 'مسح كل البيانات';
+
+  @override
+  String get purgeAllConfirmTitle => 'مسح نهائي لكل البيانات';
+
+  @override
+  String get purgeAllConfirmAction => 'مسح كل البيانات';
+
+  @override
+  String get purgeAllNothingToDo => 'لا توجد بيانات لمسحها';
+
+  @override
   String get usersIntro => 'اعتماد الحسابات الجديدة وإدارة الصلاحيات.';
 
   @override

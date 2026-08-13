@@ -1423,6 +1423,54 @@ abstract class L {
   /// **'لا توجد بيانات مالية لمسحها'**
   String get purgeNothingToDo;
 
+  /// No description provided for @purgeAllTitle.
+  ///
+  /// In ar, this message translates to:
+  /// **'مسح بيانات العائلات والأعضاء'**
+  String get purgeAllTitle;
+
+  /// No description provided for @purgeAllIntro.
+  ///
+  /// In ar, this message translates to:
+  /// **'يحذف نهائياً كل العائلات والأعضاء، ومعها كل البيانات المالية. تعود قاعدة البيانات فارغة تماماً كما لو أن النظام لم يُستعمل بعد.'**
+  String get purgeAllIntro;
+
+  /// No description provided for @purgeAllWhyFinancial.
+  ///
+  /// In ar, this message translates to:
+  /// **'لماذا تُحذف البيانات المالية معها: كل استحقاق وكل إيصال مرتبط بعائلة، فلا يمكن حذف العائلة وإبقاء إيصالها.'**
+  String get purgeAllWhyFinancial;
+
+  /// No description provided for @purgeAllKeeps.
+  ///
+  /// In ar, this message translates to:
+  /// **'لا يُحذف: إعدادات الجمعية وحسابات المستخدمين، فيبقى دخولك للتطبيق كما هو.'**
+  String get purgeAllKeeps;
+
+  /// No description provided for @purgeAllButton.
+  ///
+  /// In ar, this message translates to:
+  /// **'مسح كل البيانات'**
+  String get purgeAllButton;
+
+  /// No description provided for @purgeAllConfirmTitle.
+  ///
+  /// In ar, this message translates to:
+  /// **'مسح نهائي لكل البيانات'**
+  String get purgeAllConfirmTitle;
+
+  /// No description provided for @purgeAllConfirmAction.
+  ///
+  /// In ar, this message translates to:
+  /// **'مسح كل البيانات'**
+  String get purgeAllConfirmAction;
+
+  /// No description provided for @purgeAllNothingToDo.
+  ///
+  /// In ar, this message translates to:
+  /// **'لا توجد بيانات لمسحها'**
+  String get purgeAllNothingToDo;
+
   /// No description provided for @usersIntro.
   ///
   /// In ar, this message translates to:

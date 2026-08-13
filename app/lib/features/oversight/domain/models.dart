@@ -378,6 +378,8 @@ class PurgeResult {
     required this.allocations,
     required this.cashMovements,
     required this.auditEntries,
+    this.families = 0,
+    this.members = 0,
   });
 
   final int receivables;
@@ -387,8 +389,14 @@ class PurgeResult {
   final int cashMovements;
   final int auditEntries;
 
+  /// Only `purge_all_data` reports these. The financial purge leaves the
+  /// directory alone and omits both keys, so they decode to zero — which is the
+  /// truth about what it removed, not a missing value.
+  final int families;
+  final int members;
+
   /// Every row the purge removed, for the one-line confirmation the screen
-  /// shows. The six figures are kept separately because an admin who purged by
+  /// shows. The figures are kept separately because an admin who purged by
   /// accident will want to know exactly what went.
   int get total =>
       receivables +
@@ -396,7 +404,9 @@ class PurgeResult {
       payments +
       allocations +
       cashMovements +
-      auditEntries;
+      auditEntries +
+      families +
+      members;
 
   factory PurgeResult.fromJson(Map<String, dynamic> json) => PurgeResult(
     receivables: _int(json['receivables']),
@@ -405,6 +415,8 @@ class PurgeResult {
     allocations: _int(json['allocations']),
     cashMovements: _int(json['cashMovements']),
     auditEntries: _int(json['auditEntries']),
+    families: _int(json['families']),
+    members: _int(json['members']),
   );
 }
 

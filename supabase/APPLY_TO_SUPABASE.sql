@@ -1431,6 +1431,85 @@ BEGIN
     'auditEntries',    v_audit);
 END $$;
 
+-- ═════════════════════════════════════════════════════════════════════════════
+-- Purge, the wider one — the directory as well as the money.
+--
+-- WHY IT CANNOT BE "FAMILIES ONLY": receivables, payments and cash_movements all
+-- carry `family_id … ON DELETE RESTRICT`, and members does too. A purge that
+-- removed families while a single receipt still pointed at one would be refused
+-- by the storage engine, so the choice is between erasing the financial rows
+-- alongside them or refusing whenever any exist. Refusing would mean the button
+-- fails for exactly the person who wants it — an admin clearing a trial run —
+-- and would leave him pressing two buttons in an order nothing tells him about.
+-- So this is deliberately a SUPERSET of purge_financial_data, and the screen
+-- says so rather than surprising him after the fact.
+--
+-- The separate confirmation phrase is the point of having two functions at all.
+-- Both are admin-only and both truncate; what stops a mis-click from erasing the
+-- directory when only the figures were meant is that 'مسح نهائي' does not
+-- satisfy this function, and the app cannot send a phrase the admin did not type.
+--
+-- WHAT SURVIVES: association_settings and profiles. Wiping profiles would strand
+-- the association outside its own app — the last-admin guard exists precisely to
+-- make that unreachable — and settings are configuration, not data.
+--
+-- Order and CASCADE: every FK pointing INTO these eight originates in one of the
+-- eight (members → families, receivable_lines → members, receivables →
+-- father_member_id, and the four financial links), so Postgres does not demand
+-- CASCADE. A ninth table referencing families and left off this list would fail
+-- loudly instead of being silently skipped.
+-- ═════════════════════════════════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION public.purge_all_data(p_confirm text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth AS $$
+DECLARE
+  v_recv   bigint;
+  v_lines  bigint;
+  v_pay    bigint;
+  v_alloc  bigint;
+  v_cash   bigint;
+  v_audit  bigint;
+  v_fam    bigint;
+  v_mem    bigint;
+BEGIN
+  PERFORM public.require_role('admin');
+
+  -- Distinct from purge_financial_data's phrase ON PURPOSE. See above.
+  IF btrim(coalesce(p_confirm, '')) <> 'مسح كل البيانات' THEN
+    RAISE EXCEPTION 'عبارة التأكيد غير مطابقة، لم يتم حذف أي شيء'
+      USING ERRCODE = 'RUL13';
+  END IF;
+
+  SELECT count(*) INTO v_recv   FROM public.receivables;
+  SELECT count(*) INTO v_lines  FROM public.receivable_lines;
+  SELECT count(*) INTO v_pay    FROM public.payments;
+  SELECT count(*) INTO v_alloc  FROM public.payment_allocations;
+  SELECT count(*) INTO v_cash   FROM public.cash_movements;
+  SELECT count(*) INTO v_audit  FROM public.audit_log;
+  SELECT count(*) INTO v_fam    FROM public.families;
+  SELECT count(*) INTO v_mem    FROM public.members;
+
+  TRUNCATE public.payment_allocations,
+           public.cash_movements,
+           public.payments,
+           public.receivable_lines,
+           public.receivables,
+           public.audit_log,
+           public.members,
+           public.families
+    RESTART IDENTITY;
+
+  RETURN jsonb_build_object(
+    'receivables',     v_recv,
+    'receivableLines', v_lines,
+    'payments',        v_pay,
+    'allocations',     v_alloc,
+    'cashMovements',   v_cash,
+    'auditEntries',    v_audit,
+    'families',        v_fam,
+    'members',         v_mem);
+END $$;
+
 -- ── Execution grants ─────────────────────────────────────────────────────────
 -- Every function re-checks the role internally, so granting EXECUTE broadly to
 -- authenticated is safe: a viewer calling register_payment gets RUL00, not a row.
@@ -1442,7 +1521,8 @@ GRANT EXECUTE ON FUNCTION
   public.save_family(bigint, jsonb, jsonb),
   public.update_settings(jsonb),
   public.set_user_access(uuid, app_role, app_status),
-  public.purge_financial_data(text)
+  public.purge_financial_data(text),
+  public.purge_all_data(text)
 TO authenticated;
 
 -- write_audit is NOT granted: it is an internal helper. Exposing it would let
@@ -2555,7 +2635,7 @@ RETURNS text[] LANGUAGE sql IMMUTABLE AS $$
     'my_role()',
     'has_role(app_role)',
 
-    -- Writes. Eight functions, each require_role()-gated, each one transaction.
+    -- Writes. Nine functions, each require_role()-gated, each one transaction.
     'register_payment(bigint,numeric,pay_method,text,text,text)',
     'cancel_payment(bigint,text)',
     'generate_period(character)',
@@ -2563,11 +2643,13 @@ RETURNS text[] LANGUAGE sql IMMUTABLE AS $$
     'save_family(bigint,jsonb,jsonb)',
     'update_settings(jsonb)',
     'set_user_access(uuid,app_role,app_status)',
-    -- The destructive one. admin-only, and refuses without the typed phrase.
-    -- It is on the list because Settings calls it directly; the reason it is
-    -- safe to expose is the same reason the other seven are — the gate is
+    -- The two destructive ones. admin-only, and each refuses without its OWN
+    -- typed phrase, so the phrase that clears the figures cannot clear the
+    -- directory. They are on the list because Settings calls them directly; the
+    -- reason that is safe is the same reason the other seven are — the gate is
     -- inside the body, not in who can reach it.
     'purge_financial_data(text)',
+    'purge_all_data(text)',
 
     -- Reads. STABLE and SECURITY INVOKER, so RLS still decides what they return.
     'period_label(text)',
@@ -2771,12 +2853,12 @@ BEGIN
    WHERE n.nspname = 'public'
      AND p.proname IN ('register_payment','cancel_payment','generate_period',
                        'auto_close_periods','save_family','update_settings',
-                       'set_user_access','purge_financial_data','api_dashboard',
-                       'api_family_detail','api_family_statement',
+                       'set_user_access','purge_financial_data','purge_all_data',
+                       'api_dashboard','api_family_detail','api_family_statement',
                        'api_receivables','api_alerts','api_financial_report',
                        'api_settings','api_me');
-  IF v_funcs <> 16 THEN
-    RAISE EXCEPTION 'expected 16 API functions, found %', v_funcs;
+  IF v_funcs <> 17 THEN
+    RAISE EXCEPTION 'expected 17 API functions, found %', v_funcs;
   END IF;
 
   -- Every table must have RLS ON. A table without it is readable by anyone

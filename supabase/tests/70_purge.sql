@@ -1,4 +1,11 @@
--- 70_purge.sql — purge_financial_data(), the one deliberate exception to rule 9.
+-- 70_purge.sql — the two purges, the deliberate exceptions to rule 9.
+--
+--   purge_financial_data  the figures only; the directory survives
+--   purge_all_data        the directory too, and therefore the figures with it
+--
+-- Both are exercised here, narrow first, because the wide one's starting state
+-- is whatever the narrow one leaves behind — which is the state a real admin is
+-- in when he decides clearing the figures was not enough.
 --
 -- RUNS LAST, AND HAS TO. It erases every payment, receivable, cash movement and
 -- audit row the four preceding files created, so anything scheduled after it
@@ -156,3 +163,82 @@ SELECT probe.eq('purge', 'no client role can TRUNCATE the financial tables itsel
 SELECT probe.eq('purge', 'anon cannot reach the purge function at all',
   $sql$ SELECT has_function_privilege('anon',
           'public.purge_financial_data(text)', 'EXECUTE')::text $sql$, 'false');
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- purge_all_data — the wider purge, which takes the directory too.
+--
+-- Runs after the narrow one on purpose: the state it starts from is the one the
+-- narrow purge leaves behind (a fresh receivable, one receipt, the directory
+-- untouched), which is exactly the state an admin is in when he decides the
+-- figures were not enough and the families have to go as well.
+--
+-- The check that carries the design is 'the financial phrase does NOT satisfy
+-- it'. Two admin-only truncating functions are only safely distinct if the
+-- phrase for one is refused by the other; without that, having two is theatre.
+-- ═════════════════════════════════════════════════════════════════════════════
+
+CREATE TEMP TABLE purge_all_before AS
+  SELECT (SELECT count(*) FROM public.families) AS families,
+         (SELECT count(*) FROM public.members)  AS members,
+         (SELECT count(*) FROM public.profiles) AS profiles;
+
+SELECT probe.eq('purge_all', 'the directory is still standing before the wider purge',
+  $sql$ SELECT ((SELECT count(*) FROM public.families) > 0
+            AND (SELECT count(*) FROM public.members)  > 0)::text $sql$, 'true');
+
+SET ROLE authenticated;
+
+SELECT probe.become('00000000-0000-0000-0000-0000000000a3');  -- treasurer
+SELECT probe.raises('purge_all', 'a treasurer cannot purge the directory',
+  $sql$ SELECT public.purge_all_data('مسح كل البيانات') $sql$, 'RUL00');
+
+SELECT probe.become('00000000-0000-0000-0000-0000000000a1');  -- admin
+
+-- THE check. An admin who meant to clear the figures, and typed the phrase he
+-- knows, must not empty the directory instead.
+SELECT probe.raises('purge_all', 'the financial phrase does NOT satisfy the wider purge',
+  $sql$ SELECT public.purge_all_data('مسح نهائي') $sql$, 'RUL13');
+-- And the reverse, so neither phrase is a superset of the other.
+SELECT probe.raises('purge_all', 'the wider phrase does NOT satisfy the financial purge',
+  $sql$ SELECT public.purge_financial_data('مسح كل البيانات') $sql$, 'RUL13');
+
+RESET ROLE;
+SELECT probe.eq('purge_all', 'the refused attempts left the directory alone',
+  $sql$ SELECT ((SELECT count(*) FROM public.families)
+              = (SELECT families FROM purge_all_before))::text $sql$, 'true');
+
+SET ROLE authenticated;
+SELECT probe.succeeds('purge_all', 'an admin with the wider phrase purges everything',
+  $sql$ SELECT public.purge_all_data('مسح كل البيانات') $sql$);
+RESET ROLE;
+
+SELECT probe.eq('purge_all', 'families are gone',
+  $sql$ SELECT count(*)::text FROM public.families $sql$, '0');
+SELECT probe.eq('purge_all', 'members are gone',
+  $sql$ SELECT count(*)::text FROM public.members $sql$, '0');
+SELECT probe.eq('purge_all', 'the financial tables went with them',
+  $sql$ SELECT ((SELECT count(*) FROM public.receivables)
+              + (SELECT count(*) FROM public.receivable_lines)
+              + (SELECT count(*) FROM public.payments)
+              + (SELECT count(*) FROM public.payment_allocations)
+              + (SELECT count(*) FROM public.cash_movements)
+              + (SELECT count(*) FROM public.audit_log))::text $sql$, '0');
+
+-- What must NOT go. Wiping profiles would strand the association outside its own
+-- app, and settings are configuration rather than data.
+SELECT probe.eq('purge_all', 'the association settings survived',
+  $sql$ SELECT count(*)::text FROM public.association_settings $sql$, '1');
+SELECT probe.eq('purge_all', 'every user account survived',
+  $sql$ SELECT ((SELECT count(*) FROM public.profiles)
+              = (SELECT profiles FROM purge_all_before))::text $sql$, 'true');
+
+-- RESTART IDENTITY reaches families too, so the association's first real family
+-- is F-0001 rather than a continuation of the trial run's codes.
+SELECT probe.succeeds('purge_all', 'a family can be created again after the purge',
+  $sql$ INSERT INTO public.families DEFAULT VALUES $sql$);
+SELECT probe.eq('purge_all', 'RESTART IDENTITY: the first family is F-0001',
+  $sql$ SELECT family_code FROM public.families ORDER BY id LIMIT 1 $sql$, 'F-0001');
+
+SELECT probe.eq('purge_all', 'anon cannot reach the wider purge either',
+  $sql$ SELECT has_function_privilege('anon',
+          'public.purge_all_data(text)', 'EXECUTE')::text $sql$, 'false');

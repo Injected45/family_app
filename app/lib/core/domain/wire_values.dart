@@ -54,6 +54,15 @@ abstract final class PurgeWire {
   /// literal. Changing the wording on the screen alone would leave an admin
   /// typing exactly what he was asked for and being refused.
   static const String confirmPhrase = 'مسح نهائي';
+
+  /// What `purge_all_data(p_confirm)` demands — the wider purge that takes the
+  /// families and members with it.
+  ///
+  /// Deliberately NOT a superstring of [confirmPhrase]: the two phrases are
+  /// compared with `<>`, so an admin who typed the financial phrase into the
+  /// wrong dialog is refused rather than emptying the directory. That property
+  /// is the reason there are two functions instead of one with a flag.
+  static const String confirmPhraseAll = 'مسح كل البيانات';
 }
 
 abstract final class ArabicPunctuation {

@@ -249,6 +249,15 @@
   "purgeDone": "Erased {count} rows; numbering starts over",
   "purgeNothingToDo": "There is no financial data to erase",
 
+  "purgeAllTitle": "Erase families and members",
+  "purgeAllIntro": "Permanently deletes every family and member, and all financial data with them. The database is left completely empty, as if the system had never been used.",
+  "purgeAllWhyFinancial": "Why the financial data goes too: every receivable and receipt belongs to a family, so a family cannot be removed while its receipt remains.",
+  "purgeAllKeeps": "Kept: association settings and user accounts, so your own sign-in still works.",
+  "purgeAllButton": "Erase everything",
+  "purgeAllConfirmTitle": "Permanently erase everything",
+  "purgeAllConfirmAction": "Erase everything",
+  "purgeAllNothingToDo": "There is no data to erase",
+
   "usersIntro": "Approve new accounts and manage permissions.",
   "pendingRequests": "Pending requests",
   "allUsers": "Users",

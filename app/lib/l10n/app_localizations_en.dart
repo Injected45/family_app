@@ -736,6 +736,33 @@ class LEn extends L {
   String get purgeNothingToDo => 'There is no financial data to erase';
 
   @override
+  String get purgeAllTitle => 'Erase families and members';
+
+  @override
+  String get purgeAllIntro =>
+      'Permanently deletes every family and member, and all financial data with them. The database is left completely empty, as if the system had never been used.';
+
+  @override
+  String get purgeAllWhyFinancial =>
+      'Why the financial data goes too: every receivable and receipt belongs to a family, so a family cannot be removed while its receipt remains.';
+
+  @override
+  String get purgeAllKeeps =>
+      'Kept: association settings and user accounts, so your own sign-in still works.';
+
+  @override
+  String get purgeAllButton => 'Erase everything';
+
+  @override
+  String get purgeAllConfirmTitle => 'Permanently erase everything';
+
+  @override
+  String get purgeAllConfirmAction => 'Erase everything';
+
+  @override
+  String get purgeAllNothingToDo => 'There is no data to erase';
+
+  @override
   String get usersIntro => 'Approve new accounts and manage permissions.';
 
   @override

@@ -294,9 +294,13 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
   }
 }
 
-/// Settings → منطقة الخطر. Calls `purge_financial_data`, which erases every
-/// receivable, payment, cash movement and audit entry and leaves the directory,
-/// the settings and the accounts alone.
+/// Settings → منطقة الخطر. Two purges, kept deliberately separate.
+///
+/// The narrow one clears the figures. The wide one takes the directory with
+/// them — and therefore the figures too, because every receivable and receipt
+/// references a family with ON DELETE RESTRICT and a family cannot be removed
+/// while its receipt survives. Each demands its OWN typed phrase, so the phrase
+/// that clears the money cannot empty the directory by accident.
 class _DangerZone extends ConsumerStatefulWidget {
   const _DangerZone();
 
@@ -305,44 +309,44 @@ class _DangerZone extends ConsumerStatefulWidget {
 }
 
 class _DangerZoneState extends ConsumerState<_DangerZone> {
-  bool _purging = false;
+  /// Which card is mid-flight. A key rather than a bool so only that button
+  /// spins, while both are disabled — two truncates racing would serialise on
+  /// the same locks anyway, and the second would report counts of zero.
+  String? _running;
 
-  Future<void> _purge(L l) async {
+  Future<void> _purge(
+    L l, {
+    required String key,
+    required String phrase,
+    required String dialogTitle,
+    required String dialogAction,
+    required List<String> dialogBody,
+    required Future<PurgeResult> Function(String confirm) call,
+    required String emptyMessage,
+  }) async {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
 
     final bool? confirmed = await showDialog<bool>(
       context: context,
-      // The phrase must be typed even to dismiss by accident, so tapping the
-      // scrim cannot be mistaken for either answer.
+      // Dismissing by tapping the scrim must not be readable as either answer.
       barrierDismissible: false,
-      builder: (BuildContext dialogContext) => const _PurgeConfirmDialog(),
+      builder: (BuildContext _) => _PurgeConfirmDialog(
+        phrase: phrase,
+        title: dialogTitle,
+        actionLabel: dialogAction,
+        body: dialogBody,
+      ),
     );
     if (confirmed != true) return;
 
-    setState(() => _purging = true);
+    setState(() => _running = key);
     try {
-      final PurgeResult result = await ref
-          .read(oversightRepositoryProvider)
-          .purgeFinancialData(confirm: PurgeWire.confirmPhrase);
-
-      // Every screen that reads money is now stale. Invalidating the families
-      // provider too is not redundant: the list carries each family's debt.
-      ref.invalidate(dashboardProvider);
-      ref.invalidate(alertsProvider);
-      ref.invalidate(auditProvider);
-      ref.invalidate(reportProvider);
-      ref.invalidate(directory.familiesProvider);
-      ref.invalidate(directory.familyDetailProvider);
-      ref.invalidate(directory.statementProvider);
-      ref.invalidate(directory.receivablesProvider);
-      ref.invalidate(finance.paymentsProvider);
-      ref.invalidate(finance.cashSummaryProvider);
-      ref.invalidate(finance.cashMovementsProvider);
-
+      final PurgeResult result = await call(phrase);
+      _invalidateEverything();
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            result.total == 0 ? l.purgeNothingToDo : l.purgeDone(result.total),
+            result.total == 0 ? emptyMessage : l.purgeDone(result.total),
           ),
         ),
       );
@@ -351,8 +355,25 @@ class _DangerZoneState extends ConsumerState<_DangerZone> {
         SnackBar(content: Text(describeApiFailure(l, failure))),
       );
     } finally {
-      if (mounted) setState(() => _purging = false);
+      if (mounted) setState(() => _running = null);
     }
+  }
+
+  /// The same set for both purges. The narrow one leaves the directory standing,
+  /// but a family row carries its own debt, so those lists are stale either way.
+  void _invalidateEverything() {
+    ref.invalidate(dashboardProvider);
+    ref.invalidate(alertsProvider);
+    ref.invalidate(auditProvider);
+    ref.invalidate(reportProvider);
+    ref.invalidate(directory.familiesProvider);
+    ref.invalidate(directory.familyDetailProvider);
+    ref.invalidate(directory.statementProvider);
+    ref.invalidate(directory.membersProvider);
+    ref.invalidate(directory.receivablesProvider);
+    ref.invalidate(finance.paymentsProvider);
+    ref.invalidate(finance.cashSummaryProvider);
+    ref.invalidate(finance.cashMovementsProvider);
   }
 
   @override
@@ -363,62 +384,50 @@ class _DangerZoneState extends ConsumerState<_DangerZone> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         _Section(title: l.dangerZoneSection),
-        Container(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          decoration: BoxDecoration(
-            color: AppColors.dangerSoft,
-            borderRadius: BorderRadius.circular(AppRadius.control),
+        _DangerCard(
+          title: l.purgeTitle,
+          body: <String>[l.purgeIntro, l.purgeKeeps],
+          warning: l.purgeIrreversible,
+          buttonLabel: l.purgeButton,
+          busy: _running == 'financial',
+          enabled: _running == null,
+          onPressed: () => _purge(
+            l,
+            key: 'financial',
+            phrase: PurgeWire.confirmPhrase,
+            dialogTitle: l.purgeConfirmTitle,
+            dialogAction: l.purgeConfirmAction,
+            dialogBody: <String>[l.purgeIntro],
+            call: (String confirm) => ref
+                .read(oversightRepositoryProvider)
+                .purgeFinancialData(confirm: confirm),
+            emptyMessage: l.purgeNothingToDo,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                l.purgeTitle,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.danger,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        _DangerCard(
+          title: l.purgeAllTitle,
+          body: <String>[
+            l.purgeAllIntro,
+            l.purgeAllWhyFinancial,
+            l.purgeAllKeeps,
+          ],
+          warning: l.purgeIrreversible,
+          buttonLabel: l.purgeAllButton,
+          busy: _running == 'all',
+          enabled: _running == null,
+          onPressed: () => _purge(
+            l,
+            key: 'all',
+            phrase: PurgeWire.confirmPhraseAll,
+            dialogTitle: l.purgeAllConfirmTitle,
+            dialogAction: l.purgeAllConfirmAction,
+            dialogBody: <String>[l.purgeAllIntro, l.purgeAllWhyFinancial],
+            call: (String confirm) =>
+                ref.read(oversightRepositoryProvider).purgeAllData(
+                  confirm: confirm,
                 ),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                l.purgeIntro,
-                style: const TextStyle(fontSize: 12, height: 1.6),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                l.purgeKeeps,
-                style: const TextStyle(fontSize: 12, height: 1.6),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                l.purgeIrreversible,
-                style: const TextStyle(
-                  fontSize: 12,
-                  height: 1.6,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.danger,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              FilledButton.icon(
-                onPressed: _purging ? null : () => _purge(l),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.danger,
-                  foregroundColor: AppColors.onFill,
-                ),
-                icon: _purging
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppColors.onFill,
-                        ),
-                      )
-                    : const Icon(Icons.delete_forever_outlined, size: 18),
-                label: Text(l.purgeButton),
-              ),
-            ],
+            emptyMessage: l.purgeAllNothingToDo,
           ),
         ),
       ],
@@ -426,15 +435,107 @@ class _DangerZoneState extends ConsumerState<_DangerZone> {
   }
 }
 
+/// One destructive action, presented the same way both times: what it removes,
+/// what it spares, then the irreversibility line in red directly above the
+/// button that does it.
+class _DangerCard extends StatelessWidget {
+  const _DangerCard({
+    required this.title,
+    required this.body,
+    required this.warning,
+    required this.buttonLabel,
+    required this.busy,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final String title;
+  final List<String> body;
+  final String warning;
+  final String buttonLabel;
+  final bool busy;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.dangerSoft,
+        borderRadius: BorderRadius.circular(AppRadius.control),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: AppColors.danger,
+            ),
+          ),
+          for (final String line in body) ...<Widget>[
+            const SizedBox(height: AppSpacing.xs),
+            Text(line, style: const TextStyle(fontSize: 12, height: 1.6)),
+          ],
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            warning,
+            style: const TextStyle(
+              fontSize: 12,
+              height: 1.6,
+              fontWeight: FontWeight.w700,
+              color: AppColors.danger,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          FilledButton.icon(
+            onPressed: enabled ? onPressed : null,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.danger,
+              foregroundColor: AppColors.onFill,
+            ),
+            icon: busy
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.onFill,
+                    ),
+                  )
+                : const Icon(Icons.delete_forever_outlined, size: 18),
+            label: Text(buttonLabel),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Type-the-phrase confirmation.
 ///
-/// The button stays disabled until the field matches [PurgeWire.confirmPhrase]
-/// exactly, which is the same string `purge_financial_data` checks server-side.
-/// Enforcing it here as well is not belt-and-braces for its own sake — it is what
-/// makes the refusal instant and legible instead of a round trip that returns
-/// RUL13.
+/// The button stays disabled until the field matches [phrase] exactly — the same
+/// string the corresponding SQL function compares against. Checking it here as
+/// well is not belt-and-braces for its own sake: it makes the refusal instant
+/// and legible instead of a round trip that comes back RUL13.
+///
+/// [phrase] is a parameter, not a constant, because the two purges must not
+/// share one. An admin who means to clear the figures and is shown the wider
+/// dialog types the phrase he knows, and is refused.
 class _PurgeConfirmDialog extends StatefulWidget {
-  const _PurgeConfirmDialog();
+  const _PurgeConfirmDialog({
+    required this.phrase,
+    required this.title,
+    required this.actionLabel,
+    required this.body,
+  });
+
+  final String phrase;
+  final String title;
+  final String actionLabel;
+  final List<String> body;
 
   @override
   State<_PurgeConfirmDialog> createState() => _PurgeConfirmDialogState();
@@ -452,16 +553,18 @@ class _PurgeConfirmDialogState extends State<_PurgeConfirmDialog> {
   @override
   Widget build(BuildContext context) {
     final L l = L.of(context);
-    final bool matches = _typed.text.trim() == PurgeWire.confirmPhrase;
+    final bool matches = _typed.text.trim() == widget.phrase;
 
     return GlassDialog(
-      title: Text(l.purgeConfirmTitle),
+      title: Text(widget.title),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(l.purgeIntro, style: const TextStyle(fontSize: 12, height: 1.6)),
-          const SizedBox(height: AppSpacing.xs),
+          for (final String line in widget.body) ...<Widget>[
+            Text(line, style: const TextStyle(fontSize: 12, height: 1.6)),
+            const SizedBox(height: AppSpacing.xs),
+          ],
           Text(
             l.purgeIrreversible,
             style: const TextStyle(
@@ -473,7 +576,7 @@ class _PurgeConfirmDialogState extends State<_PurgeConfirmDialog> {
           ),
           const SizedBox(height: AppSpacing.md),
           Text(
-            l.purgeConfirmPrompt(PurgeWire.confirmPhrase),
+            l.purgeConfirmPrompt(widget.phrase),
             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: AppSpacing.xs),
@@ -499,7 +602,7 @@ class _PurgeConfirmDialogState extends State<_PurgeConfirmDialog> {
             backgroundColor: AppColors.danger,
             foregroundColor: AppColors.onFill,
           ),
-          child: Text(l.purgeConfirmAction),
+          child: Text(widget.actionLabel),
         ),
       ],
     );
