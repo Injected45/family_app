@@ -28,7 +28,7 @@ That single constraint explains most of the design:
 | | |
 |---|---|
 | **Reads** | Direct PostgREST against `v_*` views, gated by RLS on the caller's role |
-| **Writes** | Only through seven `SECURITY DEFINER` functions. `authenticated` holds no INSERT/UPDATE/DELETE on any table, and no table has a write policy |
+| **Writes** | Only through eleven `SECURITY DEFINER` functions. `authenticated` holds no INSERT/UPDATE/DELETE on any table, and no table has a write policy |
 | **Why** | A policy can only judge the row in front of it. It cannot know that this insert into `payment_allocations` is the third of five that must all land or none. A function body is one transaction |
 
 **Money is text end to end.** Postgres serialises `numeric` as a bare JSON number,
@@ -53,6 +53,11 @@ enabled in the Supabase dashboard; until then use the dev sign-in button, which 
 an ordinary email/password account with **no** special privilege — its role still
 comes from `public.profiles` like everyone else's.
 
+Google sign-in: `docs/GOOGLE_SIGNIN.md` walks through it end to end. The short
+version is that the app uses `signInWithIdToken`, so you need an Android OAuth
+client (package name + signing SHA-1) *and* a web one, and the **web** client ID
+is the one the app is built with.
+
 New installs: see `docs/SUPABASE_SETUP.md`. It covers applying the schema
 (`supabase/APPLY_TO_SUPABASE.sql`, one transaction, self-verifying), enabling
 Google, and getting the first administrator in — which needs a deliberate manual
@@ -67,8 +72,8 @@ Nothing here is asserted without an executable check.
 
 ```bash
 bash supabase/tests/local_pg.sh start      # provisions a local PostgreSQL
-bash supabase/tests/probe.sh               # 179 checks
-python supabase/tests/verify_live.py <pw>  #  52 checks, over HTTPS
+bash supabase/tests/probe.sh               # 257 checks
+python supabase/tests/verify_live.py <pw>  # over HTTPS; SEE THE WARNING BELOW
 cd app && flutter test                     # 121 tests
 cd app && dart run tool/rtl_lint.dart
 cd app && dart run tool/supabase_lint.dart
@@ -82,7 +87,11 @@ exists, not that the rule bites. It also races two real psql sessions against on
 balance to prove the FIFO allocation cannot double-spend, and injects a failure
 after the allocations are written to prove the whole transaction rolls back.
 
-**`verify_live.py`** is the layer the local suite cannot reach: PostgREST's status
+**`verify_live.py`** seeds its own starting state, which means it **erases every
+payment, receivable, cash movement and audit entry in the project it points at**.
+It refuses once the project holds more than the one fixture family unless you
+pass `--reset`. Never point it at a project with real figures in it. It is the
+layer the local suite cannot reach: PostgREST's status
 codes, GoTrue's JWT, and the actual JSON encoding. A privilege-escalation bug
 (`write_audit` callable by any signed-in user) passed every local check and was
 caught only here — see §8.4 of `docs/SUPABASE_MIGRATION_PLAN.md`.
@@ -113,6 +122,7 @@ supabase/
   tests/                       probe suite, fixtures, live verification
 docs/
   SUPABASE_SETUP.md            how to stand up a project
+  GOOGLE_SIGNIN.md             enabling Google sign-in, and why it fails
   SUPABASE_MIGRATION_PLAN.md   what each piece became, and what was lost
   MIGRATION_PLAN.md            the original Node/MySQL plan, for history
 ```

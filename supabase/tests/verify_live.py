@@ -1,10 +1,17 @@
 # verify_live.py — end-to-end verification against the LIVE Supabase project.
 #
 #   python supabase/tests/verify_live.py <file-containing-the-dev-password>
+#                                        [--reset]
 #
-# Fifty-two checks over HTTPS as a real authenticated user: reads, the money path,
-# cancellation, the audit trail, the hostile client, and money-never-a-float across
-# every view and every read function. Exits non-zero on any failure.
+# Every check runs over HTTPS as a real authenticated user: reads, the money
+# path, cancellation, the audit trail, the hostile client, and
+# money-never-a-float across every view and every read function. It prints how
+# many it ran and exits non-zero on any failure.
+#
+# It SEEDS its own starting state first, which means it erases every payment,
+# receivable, cash movement and audit entry in the project. It refuses to do
+# that once the project holds more than the one fixture family unless --reset
+# says so out loud. Do not point this at a project with real figures in it.
 #
 # This is the layer the local probe suite cannot reach. probe.sh proves the SQL
 # against a real Postgres; this proves PostgREST, GoTrue, the JWT, the HTTP status
@@ -50,10 +57,12 @@ def call(path, payload=None, jwt=None, method=None):
             return e.code, raw
 
 
+passed = []
+
+
 def check(name, ok, detail=''):
     print(('  PASS  ' if ok else '  FAIL  ') + name + ('' if ok else '  << ' + str(detail)[:220]))
-    if not ok:
-        failures.append(name)
+    (passed if ok else failures).append(name)
 
 
 def rpc(fn, params, jwt):
@@ -69,6 +78,7 @@ if status != 200:
     sys.exit(1)
 JWT = body['access_token']
 print('signed in as admin@fam.test\n')
+
 
 print('── repair the row the broken shell corrupted ' + '─' * 34)
 # save_family with the same family id and correct UTF-8 rewrites the names in
@@ -94,6 +104,56 @@ status, fams = call('/rest/v1/v_families?select=familyCode,fatherName', jwt=JWT)
 check('the father name is Arabic again, not question marks',
       status == 200 and fams and fams[0]['fatherName'] == 'محمد علي الرحالة',
       fams)
+
+# ── Seed the starting state ──────────────────────────────────────────────────
+# This used to be assumed rather than created, and that made the suite
+# single-use: the money path registers a 40.00 payment and only cancels it at
+# the very end, so ANY failure in between left the payment standing. The next
+# run then found 20.00 outstanding instead of 60.00, could not register 40.00,
+# and died on a KeyError. A verification you can only run once is not a
+# verification — and worse, a crashed run silently left a fake receipt on the
+# live project.
+#
+# Seeding here rather than cleaning up at the end is deliberate: an exit path
+# only runs if the script reaches it, and the runs that matter are the ones
+# that fail.
+#
+# It has to come AFTER the repair above. generate_period() bills from the
+# members as they stand, and eligibility is decided by the son's date of birth —
+# which is exactly what the repair fixes. Seeding first billed the father alone
+# and produced 40.00 instead of 60.00.
+print('\n── seed ' + '─' * 69)
+status, fams = call('/rest/v1/v_families?select=id', jwt=JWT)
+if status != 200:
+    print('cannot read families:', fams)
+    sys.exit(1)
+
+# The guard. purge_financial_data() erases every payment, receivable, cash
+# movement and audit row in the project. That is harmless while the only family
+# is the fixture, and catastrophic the day the association has real figures in
+# here — so the moment the data stops looking like the fixture, this refuses and
+# makes the operator say so out loud.
+if len(fams) != 1 and '--reset' not in sys.argv:
+    print('REFUSING to seed: this project has %d families, so it is no longer\n'
+          'just the test fixture. Seeding runs purge_financial_data(), which\n'
+          'erases every payment, receivable, cash movement and audit entry.\n\n'
+          'If this project really is disposable, re-run with --reset.'
+          % len(fams))
+    sys.exit(1)
+
+status, body = rpc('purge_financial_data', {'p_confirm': 'مسح نهائي'}, JWT)
+check('financial data cleared', status == 200, body)
+
+for period in ('2026-06', '2026-07'):
+    status, body = rpc('generate_period', {'p_period': period}, JWT)
+    check('period %s generated' % period, status == 200, body)
+
+status, fams = call('/rest/v1/v_families?select=debt,paid', jwt=JWT)
+check('seeded to 60.00 outstanding, nothing paid',
+      bool(fams) and fams[0]['debt'] == '60.00' and fams[0]['paid'] == '0.00', fams)
+if failures:
+    print('\nseeding failed — the rest of the suite would report noise. Stopping.')
+    sys.exit(1)
 
 print('\n── reads ' + '─' * 68)
 status, me = rpc('api_me', {}, JWT)
@@ -290,8 +350,10 @@ for label, fn, params in (
 
 print('\n' + '=' * 78)
 if failures:
-    print('%d CHECK(S) FAILED:' % len(failures))
+    print('%d of %d CHECK(S) FAILED:' % (len(failures), len(passed) + len(failures)))
     for f in failures:
         print('  -', f)
     sys.exit(1)
-print('ALL CHECKS PASSED against the live project.')
+# Printed rather than hard-coded anywhere: a count in a comment goes stale the
+# first time someone adds a check, and then quietly misreports coverage.
+print('ALL %d CHECKS PASSED against the live project.' % len(passed))

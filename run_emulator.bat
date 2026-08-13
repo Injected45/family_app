@@ -61,6 +61,26 @@ REM exists so the app is testable before the Google provider is switched on.
 set "DEV_LOGIN_EMAIL=admin@fam.test"
 set "DEV_LOGIN_PASSWORD=Fam-Dev-m6sG8tBTWs1"
 
+REM ---------------------------------------------------------------------------
+REM  Google sign-in. Paste the WEB client ID here - the web one on Android too.
+REM  Leave it empty and the Google button stays disabled; the dev button still
+REM  works, so an unconfigured checkout is not a broken checkout.
+REM
+REM  This is the ID, NOT the secret. The secret goes in the Supabase dashboard
+REM  (Authentication - Providers - Google) and must never appear in this file:
+REM  anything here ships inside the APK.
+REM
+REM  Why the WEB client ID and not the Android one: the app signs in with
+REM  signInWithIdToken, so Google must issue a token whose AUDIENCE is the
+REM  backend that will verify it - Supabase - and Supabase identifies itself by
+REM  the web client ID. The Android OAuth client still has to EXIST in the same
+REM  Google Cloud project, registered against the package name and the signing
+REM  SHA-1, or Google refuses to issue a token at all. It is just never named
+REM  here. A token minted for the Android client verifies on the device and is
+REM  then rejected by Supabase, which is the commonest way this fails.
+REM ---------------------------------------------------------------------------
+set "GOOGLE_SERVER_CLIENT_ID="
+
 set "MODE=--debug"
 set "AVD="
 set "TMPD=%TEMP%\family_app_run"
@@ -206,8 +226,9 @@ echo    dev user %DEV_LOGIN_EMAIL%
 echo   ============================================================
 echo.
 echo    On the sign-in screen use the SECOND button - the outlined one below
-echo    "Sign in with Google" - for the dev account. Google sign-in needs the
-echo    provider enabled in the Supabase dashboard first.
+echo    "Sign in with Google" - for the dev account. The Google button needs
+echo    GOOGLE_SERVER_CLIENT_ID set at the top of this script AND the provider
+echo    enabled in the Supabase dashboard. See docs/GOOGLE_SIGNIN.md.
 echo.
 echo    In the console below: r = hot reload, R = hot restart, q = quit.
 echo.
@@ -217,7 +238,8 @@ call flutter run %MODE% -d !DEVICE! ^
   --dart-define=SUPABASE_ANON_KEY=%SUPABASE_ANON_KEY% ^
   --dart-define=DEV_LOGIN=true ^
   --dart-define=DEV_LOGIN_EMAIL=%DEV_LOGIN_EMAIL% ^
-  --dart-define=DEV_LOGIN_PASSWORD=%DEV_LOGIN_PASSWORD%
+  --dart-define=DEV_LOGIN_PASSWORD=%DEV_LOGIN_PASSWORD% ^
+  --dart-define=GOOGLE_SERVER_CLIENT_ID=%GOOGLE_SERVER_CLIENT_ID%
 
 set "RC=%ERRORLEVEL%"
 if not "%RC%"=="0" (

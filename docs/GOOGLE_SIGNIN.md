@@ -1,240 +1,174 @@
-# Getting a Google web client ID
+# Turning on Google sign-in
 
-This is the last thing blocking sign-in. It takes about fifteen minutes and costs
-nothing.
+Everything below is done once. Total time is about fifteen minutes, most of it
+waiting for the Google Cloud console.
 
-You are creating **one OAuth 2.0 Client ID of type "Web application"**. That
-single ID is used in two places — the Flutter app sends it to Google, and the API
-uses it to verify that the token it receives was issued for *this* application.
+## What you are actually setting up
 
-**You do not need the client secret.** The console will show you one; ignore it.
-This server verifies Google's ID tokens against Google's public keys, which needs
-only the ID. If you paste a secret into `GOOGLE_CLIENT_ID_WEB`, `npm run preflight`
-will tell you so.
+This app does **not** use the browser redirect flow, so nothing here involves a
+redirect URL or a deep link. It calls `signInWithIdToken`: `google_sign_in`
+obtains an ID token on the device, hands it to Supabase, and Supabase verifies
+it against Google directly.
 
-> The Cloud Console's menu wording shifts every few months. The labels below were
-> current at the time of writing; if something has moved, search the console for
-> the words in **bold** rather than following a path that no longer exists.
+That means three identities have to line up:
 
----
+| Thing | Where it lives | Why |
+|---|---|---|
+| **Android OAuth client** | Google Cloud | Google will not issue a token to your app at all unless it recognises the package name + signing certificate |
+| **Web OAuth client** | Google Cloud | Names the *audience* of the token — the backend allowed to verify it. This is Supabase |
+| **Client ID + secret** | Supabase dashboard | How Supabase proves it is that audience |
 
-## 1. Create a project
+The single most common failure: using the **Android** client ID as the server
+client ID. The token is issued, the device is happy, and Supabase rejects it —
+because the token says "for the Android app" and Supabase is not the Android
+app. **Always use the web client ID.**
 
-Go to <https://console.cloud.google.com/>. In the project picker at the top,
-choose **New project**.
-
-- Name: `Family Association` (or anything — this is internal)
-- Leave the organisation and location as they are
-
-Wait for it to be created, then make sure it is the selected project. Everything
-below applies to the selected project, and creating credentials in the wrong one
-is a common half-hour lost.
+The client **secret** never leaves the Supabase dashboard. It must not appear in
+`run_emulator.bat`, in a `--dart-define`, or anywhere in this repository —
+anything there ships inside the APK.
 
 ---
 
-## 2. Configure the consent screen
+## 1. Google Cloud — create the two OAuth clients
 
-Google will not issue credentials until it knows what users are consenting to.
-Look for **Google Auth Platform** (previously **OAuth consent screen**) — it is
-under **APIs & Services**, or directly at
-<https://console.cloud.google.com/auth/overview>.
+<https://console.cloud.google.com/apis/credentials>
 
-Fill in **Branding**:
+Create a project first if you have none.
+
+If the console asks you to configure the **OAuth consent screen** before it will
+let you create credentials:
+
+- User type **External**
+- App name, your support email, your developer email — that is all that is
+  required
+- Scopes: leave the defaults. The app asks only for `email` and `profile`
+- Test users: while the app is in *Testing*, only addresses listed here can sign
+  in. **Add every family-association account that will use the app**, or publish
+  the app once you are ready
+
+Now **Create Credentials → OAuth client ID**, twice.
+
+### a. Android
 
 | Field | Value |
 |---|---|
-| App name | `جمعية العائلة` — this is what members see on the consent screen |
-| User support email | your email |
-| Developer contact email | your email |
+| Application type | Android |
+| Name | anything, e.g. `family-app-android` |
+| Package name | `ly.rhalla.family_app` |
+| SHA-1 | `58:C5:F7:AB:55:07:55:97:13:FA:02:87:C5:95:6C:E9:87:C0:5E:8A` |
 
-Then **Audience**. You have a real choice here:
+That SHA-1 is **this machine's debug keystore**
+(`C:\Users\ahmed\.android\debug.keystore`). It is what debug builds are signed
+with, so it is what you need for testing on the emulator.
 
-**Option A — Testing (recommended to start).** Add each member's Google address
-under **Test users**. Only those addresses can sign in, up to 100. No Google
-review, no waiting. For an extended family this may be all you ever need, and it
-is a genuine second lock: even if someone learns the URL, Google refuses them
-before your approval screen is reached.
+A release APK is signed with a different key and Google will refuse it until you
+add that fingerprint too. Get it with:
 
-**Option B — In production.** Anyone with a Google account can *reach* the sign-in
-screen; your own approval step still decides who gets in. Because this app asks
-only for name, email and profile picture — all "non-sensitive" scopes — **you do
-not need Google's verification review** to publish. Choose this if the association
-has more than 100 members, or if maintaining a test-user list is a chore.
+```bash
+keytool -list -v -alias <your-alias> -keystore <your-release.keystore>
+```
 
-You can switch from A to B later without changing any code.
+You can add several SHA-1s to one Android client, so debug and release can
+coexist. If you ever ship through Google Play with Play App Signing, add the
+SHA-1 that Play shows you under *Release → Setup → App signing* as well —
+that is the key Play re-signs with, and it is not yours.
 
-Under **Data access**, confirm the scopes are only `openid`,
-`.../auth/userinfo.email` and `.../auth/userinfo.profile`. Do not add others —
-anything more triggers a verification review you do not need.
+You do **not** need to download anything from this client. No
+`google-services.json` is required; the app does not use Firebase.
 
-> **A note specific to this app.** In Testing mode, Google expires *its* refresh
-> tokens after seven days, which breaks many apps every week. It does not affect
-> this one: the Google ID token is used exactly once, at sign-in, and the API then
-> issues its own session tokens. Nobody gets signed out on a seven-day cycle.
+### b. Web
+
+| Field | Value |
+|---|---|
+| Application type | Web application |
+| Name | anything, e.g. `family-app-supabase` |
+| Authorised redirect URI | `https://nomgavgvkjdlzjgwozuv.supabase.co/auth/v1/callback` |
+
+Copy the **client ID** and the **client secret** from this one.
 
 ---
 
-## 3. Create the client ID
+## 2. Supabase — enable the provider
 
-Go to **APIs & Services → Credentials**
-(<https://console.cloud.google.com/apis/credentials>), then
-**+ Create credentials → OAuth client ID**.
+Dashboard → **Authentication → Providers → Google**
 
-- **Application type: Web application** — this matters. Pick this even if you
-  only ever ship the Android app, because the Android client sends the *web*
-  client ID as its `serverClientId` so the server can verify the audience.
-- Name: `Family Association web`
+- Toggle **Enable Sign in with Google**
+- **Client ID** — the *web* client ID from step 1b
+- **Client Secret** — the *web* client secret
+- Save
 
-Now the important part.
-
----
-
-## 4. Register the exact origins you will browse to
-
-Under **Authorised JavaScript origins**, add every origin the app is served from.
-Google matches these **exactly**:
-
-- no trailing slash — `http://localhost:3000`, not `http://localhost:3000/`
-- no path — the origin only
-- no wildcards
-- **`localhost` and `127.0.0.1` are different origins.** Register the one you
-  actually type into the browser. This wastes more time than any other single
-  detail here.
-
-Which to add depends on how you run it:
-
-**Development, single origin** (the API serves the built web app — the recommended
-setup):
-
-```
-http://localhost:3000
-```
-
-**Development with hot reload** (Flutter's own dev server). Its port is random by
-default, and a new port every run means a new origin Google rejects — so pin it:
-
-```bash
-flutter run -d chrome --web-port=5000
-```
-
-```
-http://localhost:5000
-```
-
-**Production**, once you have a hostname:
-
-```
-https://jamiya.example.ly
-```
-
-HTTPS is required in production; `localhost` is the one exception Google allows
-over plain HTTP.
-
-**Authorised redirect URIs** can be left empty. The sign-in flow this app uses
-returns an ID token to the page rather than redirecting, so no redirect URI is
-involved. Adding one does no harm if the console insists.
-
-Press **Create**. Copy the **Client ID** — it looks like:
-
-```
-123456789012-a1b2c3d4e5f6g7h8i9j0.apps.googleusercontent.com
-```
-
-Ignore the client secret.
+Under **Authentication → URL Configuration**, add
+`ly.rhalla.family_app://login-callback` to *Redirect URLs*. The current flow
+never uses it, but it costs nothing and it is what a future browser-based flow
+would need.
 
 ---
 
-## 5. Put it in both places
+## 3. The app — paste the web client ID
 
-It goes in **two** places, and they must be the **same value**.
+Open `run_emulator.bat` and fill in the line near the top:
 
-**The API** — `api/.env`:
-
-```
-GOOGLE_CLIENT_ID_WEB=123456789012-a1b2c3d4e5f6g7h8i9j0.apps.googleusercontent.com
+```bat
+set "GOOGLE_SERVER_CLIENT_ID=123456789-abcdefg.apps.googleusercontent.com"
 ```
 
-**The app** — at build or run time:
+The **web** client ID, on Android too. See the table at the top for why.
+
+Then:
+
+```bat
+run_emulator.bat
+```
+
+For web builds, pass the same value to `app/run_supabase.sh`:
 
 ```bash
-cd app
-flutter run -d chrome --web-port=5000 \
-  --dart-define=API_BASE_URL=http://127.0.0.1:3000/api/v1 \
-  --dart-define=GOOGLE_SERVER_CLIENT_ID=123456789012-a1b2....apps.googleusercontent.com \
-  --dart-define=GOOGLE_CLIENT_ID=123456789012-a1b2....apps.googleusercontent.com
+flutter run -d chrome \
+  --dart-define=GOOGLE_SERVER_CLIENT_ID=... \
+  --dart-define=GOOGLE_CLIENT_ID=...          # web needs this one as well
 ```
-
-For a release build served from the API itself:
-
-```bash
-flutter build web --release \
-  --dart-define=API_BASE_URL=/api/v1 \
-  --dart-define=GOOGLE_SERVER_CLIENT_ID=<the same id> \
-  --dart-define=GOOGLE_CLIENT_ID=<the same id>
-```
-
-`API_BASE_URL=/api/v1` is a relative path, so the app talks to whatever host
-served it and nothing needs changing when the hostname does.
 
 ---
 
-## 6. Check it
+## 4. First sign-in
 
-```bash
-cd api
-npm run preflight
-```
+Tap **الدخول بحساب Google**. You will land on
+**"في انتظار الموافقة"** — awaiting approval. This is correct: every new profile
+is created `viewer` / `pending`, and the router sends pending accounts to that
+screen.
 
-The `GOOGLE_CLIENT_ID_WEB` line should read `ok`. It catches a mistyped ID, and
-specifically catches pasting the secret instead.
+An existing admin approves the account under **الإشراف → المستخدمون**.
 
-Then start the API, open the app, and press **الدخول بحساب Google**.
-
-**The first account to sign in becomes the administrator.** Make sure that is
-you. Everyone afterwards lands on "بانتظار الموافقة" until you approve them from
-the **إدارة المستخدمين** screen.
-
-If a placeholder seed user is still in the database, that bootstrap will not fire
-— `npm run preflight` reports it, and the fix is
-`npm run db:reset && npm run migrate` before importing real data.
+If you have no admin yet, that is the bootstrap problem — the first person has
+nobody to approve them. Run `supabase/bootstrap_first_admin.sql` in the SQL
+editor with your address. See `docs/SUPABASE_SETUP.md`.
 
 ---
 
 ## When it does not work
 
-| What you see | What it means |
-|---|---|
-| `Error 400: redirect_uri_mismatch` or `origin_mismatch` | The origin you are browsing is not in **Authorised JavaScript origins**. Check for a trailing slash, and check `localhost` vs `127.0.0.1` |
-| The button does nothing, console shows an origin error | Same cause. Flutter's dev server changed port — pin it with `--web-port` |
-| `403: access_denied` right after choosing an account | You are in **Testing** mode and that address is not a **Test user** |
-| `503 GOOGLE_NOT_CONFIGURED` from the API | `GOOGLE_CLIENT_ID_WEB` is not set in `api/.env`, or the API was not restarted after setting it |
-| `401 INVALID_GOOGLE_TOKEN` | The app and the API are using **different** client IDs, or `GOOGLE_SERVER_CLIENT_ID` was not passed to the build. They must match exactly |
-| `403 ACCOUNT_PENDING` | Sign-in worked. This is the approval gate — an administrator must approve the account |
-| Works in development, fails in the installed Android app | The release signing certificate's SHA-1 is not registered. See `app/README.md` |
-| Changes to origins seem ignored | Google can take a few minutes to propagate. Wait, then try a private window |
+**"لم يتم إعداد الدخول بحساب Google على الخادم بعد."**
+`GOOGLE_SERVER_CLIENT_ID` is empty, so `AppConfig.isGoogleConfigured` is false
+and `auth_controller.dart` refuses before it ever reaches Google. Step 3.
 
-Two failures worth telling apart: **`INVALID_GOOGLE_TOKEN` means the IDs do not
-match**, while **`ACCOUNT_PENDING` means everything worked** and you simply need
-to approve the account.
+**`ApiException: Unacceptable audience in id_token`** — or Supabase returns 400
+after the account chooser closes.
+You used the Android client ID. Use the web one.
 
----
+**`PlatformException(sign_in_failed, ... 10: )`**
+Error 10 is `DEVELOPER_ERROR`, and it means Google does not recognise the
+package name + SHA-1 pair. Either the Android OAuth client is missing, the SHA-1
+is from a different keystore than the build you are running, or the package name
+is not exactly `ly.rhalla.family_app`.
 
-## Later: Android and iOS
+**`Error 403: access_denied`.**
+The consent screen is in *Testing* and this address is not on the test-user
+list.
 
-Only needed if you ship native apps; the web app is complete on its own.
+**Sign-in succeeds and the app sits on "awaiting approval".**
+Working as designed. Approve the account (step 4).
 
-Create additional client IDs of type **Android** / **iOS** in the same project.
-For Android you register the package name `ly.rhalla.family_app` together with a
-signing certificate SHA-1 — and you must register **both** the debug and the
-release fingerprints, or sign-in works on your machine and fails in the store
-build. Keep passing the **web** client ID as `GOOGLE_SERVER_CLIENT_ID`; the
-platform ID goes in `GOOGLE_CLIENT_ID`.
-
-```bash
-# debug fingerprint
-keytool -list -v -alias androiddebugkey \
-  -keystore ~/.android/debug.keystore -storepass android -keypass android
-
-# release fingerprint
-keytool -list -v -keystore upload-keystore.jks -alias upload
-```
+**It worked yesterday and not today.**
+Check whether the debug keystore was regenerated — it expires, and Android
+Studio silently creates a new one, which changes the SHA-1. Re-run the `keytool`
+command above and compare.
