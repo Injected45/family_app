@@ -302,9 +302,14 @@ SELECT
   p.status::text        AS "status",
   to_char(p.last_login_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                         AS "lastLoginAt",
-  approver.display_name AS "approvedByName"
+  approver.display_name AS "approvedByName",
+  -- NULL for staff. Non-NULL marks a head of family, who stores `viewer` in
+  -- `role` and would otherwise be indistinguishable on the users screen from a
+  -- real viewer — while actually seeing far less, and something different.
+  fam.family_code       AS "familyCode"
 FROM public.profiles p
-LEFT JOIN public.profiles approver ON approver.id = p.approved_by;
+LEFT JOIN public.profiles approver ON approver.id = p.approved_by
+LEFT JOIN public.families fam ON fam.id = p.family_id;
 
 GRANT SELECT ON
   public.v_member_status, public.v_settings, public.v_officials,

@@ -33,6 +33,7 @@
   "retry": "إعادة المحاولة",
   "cancel": "إلغاء",
   "close": "إغلاق",
+  "copy": "نسخ",
   "loading": "جارٍ التحميل...",
 
   "errorGeneric": "حدث خطأ غير متوقع، يرجى المحاولة لاحقاً",
@@ -254,6 +255,23 @@
   "settingsSaved": "تم حفظ الإعدادات، ولن تتغير الاستحقاقات التاريخية",
   "confirmChangesTitle": "تأكيد التغييرات",
   "noChanges": "لا توجد تغييرات",
+
+  "familyCodeTitle": "لديك رمز عائلة؟",
+  "familyCodeBody": "إن أعطاك مسؤول الجمعية رمز دخول خاصاً بعائلتك، اكتبه هنا لترى بيانات عائلتك مباشرة.",
+  "familyCodeField": "رمز العائلة",
+  "familyCodeHint": "XXXX-XXXX-XXXX",
+  "familyCodeAction": "دخول بحساب العائلة",
+
+  "myFamilyTitle": "عائلتي",
+  "myFamilyIntro": "بيانات عائلتك واشتراكاتك ومدفوعاتك. للاطلاع فقط.",
+  "myMembersSection": "أفراد العائلة",
+  "myStatementSection": "كشف الحساب",
+
+  "issueCodeTitle": "رمز دخول العائلة",
+  "issueCodeBody": "أعطِ هذا الرمز لرب العائلة ليدخل ويرى بيانات عائلته فقط. إصدار رمز جديد يلغي القديم.",
+  "issueCodeAction": "إصدار رمز دخول",
+  "issueCodeRegenerate": "إصدار رمز جديد",
+  "issueCodeCopied": "تم نسخ الرمز",
 
   "dangerZoneSection": "منطقة الخطر",
   "purgeTitle": "مسح البيانات المالية",

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/config/glass.dart';
 import '../../../core/config/theme.dart';
 import '../../../core/format/formatters.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../core/router/destinations.dart';
 import '../../../core/widgets/app_scaffold.dart';
 import '../../../core/widgets/async_view.dart';
@@ -15,6 +17,75 @@ import '../../auth/presentation/auth_controller.dart';
 import '../../finance/presentation/payment_sheet.dart';
 import '../domain/models.dart';
 import 'providers.dart';
+
+/// Issues a fresh access code for this family and shows it once, with a copy
+/// button — the admin then sends it to the head of family himself.
+///
+/// Always issues rather than reading the current one back. The code IS the
+/// credential, and "show me what it is" and "give me a new one" are the same
+/// gesture for an admin who has lost the message: issuing revokes the previous
+/// code but does NOT sign out a head of family who already redeemed it, because
+/// by then the binding lives on his profile rather than on the code.
+Future<void> _showAccessCode(
+  BuildContext context,
+  WidgetRef ref,
+  int familyId,
+) async {
+  final L l = L.of(context);
+  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+  try {
+    final String code = await ref
+        .read(directoryRepositoryProvider)
+        .issueFamilyCode(familyId);
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) => GlassDialog(
+        title: Text(l.issueCodeTitle),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              l.issueCodeBody,
+              style: const TextStyle(fontSize: 12, height: 1.6),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            SelectableText(
+              code,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 2,
+              ),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(l.close),
+          ),
+          FilledButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: code));
+              if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+              messenger.showSnackBar(
+                SnackBar(content: Text(l.issueCodeCopied)),
+              );
+            },
+            icon: const Icon(Icons.copy, size: 18),
+            label: Text(l.copy),
+          ),
+        ],
+      ),
+    );
+  } on ApiException catch (failure) {
+    messenger.showSnackBar(
+      SnackBar(content: Text(describeApiFailure(l, failure))),
+    );
+  }
+}
 
 Color eligibilityTone(EligibilityKey key) => switch (key) {
   EligibilityKey.eligible => AppColors.info,
@@ -44,6 +115,17 @@ class FamilyDetailScreen extends ConsumerWidget {
       title: l.navFamilies,
       currentRoute: AppRoutes.families,
       actions: <Widget>[
+        // admin, not financeManager: issuing a code hands someone a permanent
+        // read of this family's figures, which is an access decision rather than
+        // a financial one. issue_family_code() gates on admin too, so a finance
+        // manager pressing it would get RUL00 — the button is hidden because
+        // offering it and then refusing is worse than not offering it.
+        if (role.atLeast(AppRole.admin))
+          IconButton(
+            tooltip: l.issueCodeTitle,
+            onPressed: () => _showAccessCode(context, ref, familyId),
+            icon: const Icon(Icons.key_outlined),
+          ),
         if (role.atLeast(AppRole.financeManager))
           IconButton(
             tooltip: l.editFamily,

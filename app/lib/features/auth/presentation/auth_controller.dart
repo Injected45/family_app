@@ -104,6 +104,35 @@ class AuthController extends Notifier<AuthState> {
     };
   }
 
+  /// Re-reads `api_me()` and re-derives the stage from it.
+  ///
+  /// Exists for one caller: redeeming a family access code. That turns a
+  /// pending account with no family into an approved one with a family, without
+  /// any sign-in taking place — so nothing else would notice, and the router
+  /// would keep the man on the waiting screen he just escaped.
+  Future<void> refreshProfile() async {
+    final AppUser? user = await ref.read(authRepositoryProvider).restore();
+    if (user == null) {
+      state = const AuthState(stage: AuthStage.signedOut);
+      return;
+    }
+    state = switch (user.status) {
+      AccountStatus.approved => AuthState(
+        stage: AuthStage.signedIn,
+        user: user,
+      ),
+      AccountStatus.pending => AuthState(
+        stage: AuthStage.pending,
+        user: user,
+        pendingEmail: user.email,
+      ),
+      AccountStatus.suspended => AuthState(
+        stage: AuthStage.suspended,
+        user: user,
+      ),
+    };
+  }
+
   /// Starts an interactive sign-in. A no-op on web, where the flow can only be
   /// started by Google's own rendered button.
   Future<void> signIn() async {

@@ -10,6 +10,11 @@ abstract final class AppRoutes {
   static const String suspended = '/suspended';
   static const String forbidden = '/forbidden';
 
+  /// The family portal. Not in [destinations] and never in the navigation bar:
+  /// it is the ONLY route a head of family may occupy, and the only one he may
+  /// not leave. See the guard in app_router.dart.
+  static const String myFamily = '/my-family';
+
   static const String home = '/';
   static const String families = '/families';
   static const String members = '/members';

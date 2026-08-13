@@ -12,6 +12,7 @@ import '../../features/auth/presentation/suspended_screen.dart';
 import '../../features/directory/presentation/families_screen.dart';
 import '../../features/directory/presentation/family_detail_screen.dart';
 import '../../features/directory/presentation/family_form_screen.dart';
+import '../../features/directory/presentation/family_portal_screen.dart';
 import '../../features/directory/presentation/members_screen.dart';
 import '../../features/directory/presentation/officials_screen.dart';
 import '../../features/directory/presentation/receivables_screen.dart';
@@ -74,6 +75,10 @@ final Provider<GoRouter> routerProvider = Provider<GoRouter>((Ref ref) {
       GoRoute(
         path: AppRoutes.forbidden,
         builder: (_, _) => const ForbiddenScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.myFamily,
+        builder: (_, _) => const FamilyPortalScreen(),
       ),
       GoRoute(path: AppRoutes.home, builder: (_, _) => const DashboardScreen()),
 
@@ -174,6 +179,23 @@ String? _guard(Ref ref, GoRouterState state) {
       break;
   }
 
+  // ── The family portal, before anything else ────────────────────────────────
+  // A head of family is signed in and approved, so he reaches this point like
+  // any viewer — but he is not staff, and every association screen would render
+  // empty for him because RLS hands him nothing outside his own family. Pinning
+  // him to one route is what turns that emptiness into a coherent app.
+  //
+  // Placed above the pre-auth redirect deliberately: that line sends anyone
+  // arriving at /splash or /login to the dashboard, and for him the dashboard
+  // is the wrong destination.
+  //
+  // This is presentation, as always. The database refuses him the same rows
+  // whether or not this branch exists — supabase/tests/45_family_portal.sql is
+  // where that is actually proved.
+  if (auth.user?.isFamilyHead ?? false) {
+    return location == AppRoutes.myFamily ? null : AppRoutes.myFamily;
+  }
+
   const Set<String> preAuthRoutes = <String>{
     AppRoutes.splash,
     AppRoutes.login,
@@ -181,6 +203,10 @@ String? _guard(Ref ref, GoRouterState state) {
     AppRoutes.suspended,
   };
   if (preAuthRoutes.contains(location)) return AppRoutes.home;
+
+  // The reverse: staff have no family scope, so the portal would render nothing
+  // for them. Sending them home beats an empty screen with no explanation.
+  if (location == AppRoutes.myFamily) return AppRoutes.home;
 
   final AppDestination? destination = destinationForLocation(location);
   final AppRole role = auth.user?.role ?? AppRole.viewer;

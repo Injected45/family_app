@@ -180,7 +180,7 @@ SELECT probe.eq('purge', 'anon cannot reach the purge function at all',
 CREATE TEMP TABLE purge_all_before AS
   SELECT (SELECT count(*) FROM public.families) AS families,
          (SELECT count(*) FROM public.members)  AS members,
-         (SELECT count(*) FROM public.profiles) AS profiles;
+         (SELECT count(*) FROM public.profiles WHERE family_id IS NULL) AS staff;
 
 SELECT probe.eq('purge_all', 'the directory is still standing before the wider purge',
   $sql$ SELECT ((SELECT count(*) FROM public.families) > 0
@@ -228,9 +228,17 @@ SELECT probe.eq('purge_all', 'the financial tables went with them',
 -- app, and settings are configuration rather than data.
 SELECT probe.eq('purge_all', 'the association settings survived',
   $sql$ SELECT count(*)::text FROM public.association_settings $sql$, '1');
-SELECT probe.eq('purge_all', 'every user account survived',
-  $sql$ SELECT ((SELECT count(*) FROM public.profiles)
-              = (SELECT profiles FROM purge_all_before))::text $sql$, 'true');
+-- STAFF accounts specifically. A head of family is deliberately NOT among the
+-- survivors: his family is being erased, so leaving his profile would leave a
+-- scope pointing at nothing, and my_family_id() would answer with a dead id.
+-- His auth.users identity survives, so the same person can redeem a fresh code
+-- once the directory is rebuilt.
+SELECT probe.eq('purge_all', 'every STAFF account survived',
+  $sql$ SELECT ((SELECT count(*) FROM public.profiles WHERE family_id IS NULL)
+              = (SELECT staff FROM purge_all_before))::text $sql$, 'true');
+SELECT probe.eq('purge_all', 'and no family-head profile is left pointing at nothing',
+  $sql$ SELECT count(*)::text FROM public.profiles
+         WHERE family_id IS NOT NULL $sql$, '0');
 
 -- RESTART IDENTITY reaches families too, so the association's first real family
 -- is F-0001 rather than a continuation of the trial run's codes.

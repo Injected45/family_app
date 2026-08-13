@@ -241,6 +241,12 @@ abstract class L {
   /// **'إغلاق'**
   String get close;
 
+  /// No description provided for @copy.
+  ///
+  /// In ar, this message translates to:
+  /// **'نسخ'**
+  String get copy;
+
   /// No description provided for @loading.
   ///
   /// In ar, this message translates to:
@@ -1350,6 +1356,90 @@ abstract class L {
   /// In ar, this message translates to:
   /// **'لا توجد تغييرات'**
   String get noChanges;
+
+  /// No description provided for @familyCodeTitle.
+  ///
+  /// In ar, this message translates to:
+  /// **'لديك رمز عائلة؟'**
+  String get familyCodeTitle;
+
+  /// No description provided for @familyCodeBody.
+  ///
+  /// In ar, this message translates to:
+  /// **'إن أعطاك مسؤول الجمعية رمز دخول خاصاً بعائلتك، اكتبه هنا لترى بيانات عائلتك مباشرة.'**
+  String get familyCodeBody;
+
+  /// No description provided for @familyCodeField.
+  ///
+  /// In ar, this message translates to:
+  /// **'رمز العائلة'**
+  String get familyCodeField;
+
+  /// No description provided for @familyCodeHint.
+  ///
+  /// In ar, this message translates to:
+  /// **'XXXX-XXXX-XXXX'**
+  String get familyCodeHint;
+
+  /// No description provided for @familyCodeAction.
+  ///
+  /// In ar, this message translates to:
+  /// **'دخول بحساب العائلة'**
+  String get familyCodeAction;
+
+  /// No description provided for @myFamilyTitle.
+  ///
+  /// In ar, this message translates to:
+  /// **'عائلتي'**
+  String get myFamilyTitle;
+
+  /// No description provided for @myFamilyIntro.
+  ///
+  /// In ar, this message translates to:
+  /// **'بيانات عائلتك واشتراكاتك ومدفوعاتك. للاطلاع فقط.'**
+  String get myFamilyIntro;
+
+  /// No description provided for @myMembersSection.
+  ///
+  /// In ar, this message translates to:
+  /// **'أفراد العائلة'**
+  String get myMembersSection;
+
+  /// No description provided for @myStatementSection.
+  ///
+  /// In ar, this message translates to:
+  /// **'كشف الحساب'**
+  String get myStatementSection;
+
+  /// No description provided for @issueCodeTitle.
+  ///
+  /// In ar, this message translates to:
+  /// **'رمز دخول العائلة'**
+  String get issueCodeTitle;
+
+  /// No description provided for @issueCodeBody.
+  ///
+  /// In ar, this message translates to:
+  /// **'أعطِ هذا الرمز لرب العائلة ليدخل ويرى بيانات عائلته فقط. إصدار رمز جديد يلغي القديم.'**
+  String get issueCodeBody;
+
+  /// No description provided for @issueCodeAction.
+  ///
+  /// In ar, this message translates to:
+  /// **'إصدار رمز دخول'**
+  String get issueCodeAction;
+
+  /// No description provided for @issueCodeRegenerate.
+  ///
+  /// In ar, this message translates to:
+  /// **'إصدار رمز جديد'**
+  String get issueCodeRegenerate;
+
+  /// No description provided for @issueCodeCopied.
+  ///
+  /// In ar, this message translates to:
+  /// **'تم نسخ الرمز'**
+  String get issueCodeCopied;
 
   /// No description provided for @dangerZoneSection.
   ///

@@ -75,9 +75,10 @@ BEGIN
    WHERE schemaname = 'public'
      AND tablename IN ('profiles','association_settings','families','members',
                        'receivables','receivable_lines','payments',
-                       'payment_allocations','cash_movements','audit_log');
-  IF v_tables <> 10 THEN
-    RAISE EXCEPTION 'expected 10 tables, found %', v_tables;
+                       'payment_allocations','cash_movements','audit_log',
+                       'family_access_codes');
+  IF v_tables <> 11 THEN
+    RAISE EXCEPTION 'expected 11 tables, found %', v_tables;
   END IF;
 
   SELECT count(*) INTO v_views FROM pg_views
@@ -92,11 +93,12 @@ BEGIN
      AND p.proname IN ('register_payment','cancel_payment','generate_period',
                        'auto_close_periods','save_family','update_settings',
                        'set_user_access','purge_financial_data','purge_all_data',
+                       'issue_family_code','redeem_family_code','my_family_id',
                        'api_dashboard','api_family_detail','api_family_statement',
                        'api_receivables','api_alerts','api_financial_report',
                        'api_settings','api_me');
-  IF v_funcs <> 17 THEN
-    RAISE EXCEPTION 'expected 17 API functions, found %', v_funcs;
+  IF v_funcs <> 20 THEN
+    RAISE EXCEPTION 'expected 20 API functions, found %', v_funcs;
   END IF;
 
   -- Every table must have RLS ON. A table without it is readable by anyone

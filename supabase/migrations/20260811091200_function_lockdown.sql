@@ -44,8 +44,14 @@ RETURNS text[] LANGUAGE sql IMMUTABLE AS $$
     'role_rank(app_role)',
     'my_role()',
     'has_role(app_role)',
+    -- Answers only for the caller's own family binding, and the family-scoped
+    -- policies call it, so the caller whose policy is being evaluated must hold
+    -- EXECUTE — otherwise every one of those policies ERRORS instead of denying,
+    -- and the failure surfaces as "permission denied for function my_family_id"
+    -- on screens that have nothing to do with the family portal.
+    'my_family_id()',
 
-    -- Writes. Nine functions, each require_role()-gated, each one transaction.
+    -- Writes. Eleven functions, each require_role()-gated, each one transaction.
     'register_payment(bigint,numeric,pay_method,text,text,text)',
     'cancel_payment(bigint,text)',
     'generate_period(character)',
@@ -60,6 +66,13 @@ RETURNS text[] LANGUAGE sql IMMUTABLE AS $$
     -- inside the body, not in who can reach it.
     'purge_financial_data(text)',
     'purge_all_data(text)',
+
+    -- The family portal. issue_ is admin-gated; redeem_ deliberately is NOT —
+    -- it is the one write a signed-in stranger may call, because until he
+    -- redeems a code he has no role and no family, and the code itself is the
+    -- authorisation. It refuses anyone who is already staff.
+    'issue_family_code(bigint)',
+    'redeem_family_code(text)',
 
     -- Reads. STABLE and SECURITY INVOKER, so RLS still decides what they return.
     'period_label(text)',

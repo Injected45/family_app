@@ -128,6 +128,26 @@ class DirectoryRepository {
           summary: ReceivablesSummary.fromJson(_obj(body['summary'])),
         );
       });
+
+  /// Generates a fresh access code for a family and returns it in plaintext,
+  /// once — the admin then sends it to the head of family himself.
+  ///
+  /// Admin-only server-side. The screen hides the button for everyone else, so
+  /// the refusal never has to be explained to a finance manager who could not
+  /// have known.
+  ///
+  /// Issuing REVOKES the family's previous code — there is one row per family
+  /// and it is overwritten — but it does NOT sign out a head of family who has
+  /// already redeemed one, because by then the binding lives on his profile.
+  /// So an admin can reissue freely when a message is lost.
+  Future<String> issueFamilyCode(int familyId) =>
+      SupabaseFailures.guard(() async {
+        final dynamic payload = await _db.rpc<dynamic>(
+          'issue_family_code',
+          params: <String, dynamic>{'p_family_id': familyId},
+        );
+        return _obj(payload)['code'] as String;
+      });
 }
 
 /// Raised when a read returns nothing for an id the caller asked for by name.

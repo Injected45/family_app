@@ -87,6 +87,9 @@ class LAr extends L {
   String get close => 'إغلاق';
 
   @override
+  String get copy => 'نسخ';
+
+  @override
   String get loading => 'جارٍ التحميل...';
 
   @override
@@ -685,6 +688,51 @@ class LAr extends L {
 
   @override
   String get noChanges => 'لا توجد تغييرات';
+
+  @override
+  String get familyCodeTitle => 'لديك رمز عائلة؟';
+
+  @override
+  String get familyCodeBody =>
+      'إن أعطاك مسؤول الجمعية رمز دخول خاصاً بعائلتك، اكتبه هنا لترى بيانات عائلتك مباشرة.';
+
+  @override
+  String get familyCodeField => 'رمز العائلة';
+
+  @override
+  String get familyCodeHint => 'XXXX-XXXX-XXXX';
+
+  @override
+  String get familyCodeAction => 'دخول بحساب العائلة';
+
+  @override
+  String get myFamilyTitle => 'عائلتي';
+
+  @override
+  String get myFamilyIntro =>
+      'بيانات عائلتك واشتراكاتك ومدفوعاتك. للاطلاع فقط.';
+
+  @override
+  String get myMembersSection => 'أفراد العائلة';
+
+  @override
+  String get myStatementSection => 'كشف الحساب';
+
+  @override
+  String get issueCodeTitle => 'رمز دخول العائلة';
+
+  @override
+  String get issueCodeBody =>
+      'أعطِ هذا الرمز لرب العائلة ليدخل ويرى بيانات عائلته فقط. إصدار رمز جديد يلغي القديم.';
+
+  @override
+  String get issueCodeAction => 'إصدار رمز دخول';
+
+  @override
+  String get issueCodeRegenerate => 'إصدار رمز جديد';
+
+  @override
+  String get issueCodeCopied => 'تم نسخ الرمز';
 
   @override
   String get dangerZoneSection => 'منطقة الخطر';

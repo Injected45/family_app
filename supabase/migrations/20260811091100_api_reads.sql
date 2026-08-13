@@ -307,6 +307,10 @@ $$;
 -- Readable by a pending or suspended account, because the app has to be able to
 -- render "awaiting approval" for exactly those users. Reads through the
 -- read_own_profile policy, not around it.
+-- `familyId` is what makes the app branch. NULL means association staff and the
+-- normal interface; non-NULL means a head of family, and the router sends him to
+-- the family portal instead. It is the same column my_role() consults, so the
+-- screen he gets and the rows RLS will give him can never disagree.
 CREATE OR REPLACE FUNCTION public.api_me() RETURNS jsonb
 LANGUAGE sql STABLE AS $$
   SELECT jsonb_build_object(
@@ -315,7 +319,9 @@ LANGUAGE sql STABLE AS $$
     'displayName', p.display_name,
     'pictureUrl', p.picture_url,
     'role', p.role::text,
-    'status', p.status::text)
+    'status', p.status::text,
+    'familyId', p.family_id,
+    'familyCode', (SELECT f.family_code FROM public.families f WHERE f.id = p.family_id))
   FROM public.profiles p WHERE p.id = auth.uid()
 $$;
 

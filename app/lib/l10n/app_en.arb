@@ -30,6 +30,7 @@
   "retry": "Retry",
   "cancel": "Cancel",
   "close": "Close",
+  "copy": "Copy",
   "loading": "Loading...",
 
   "errorGeneric": "Something went wrong. Please try again later.",
@@ -235,6 +236,23 @@
   "settingsSaved": "Settings saved; historical receivables are unchanged",
   "confirmChangesTitle": "Confirm changes",
   "noChanges": "No changes",
+
+  "familyCodeTitle": "Have a family code?",
+  "familyCodeBody": "If an association officer gave you an access code for your family, type it here to see your family's own records.",
+  "familyCodeField": "Family code",
+  "familyCodeHint": "XXXX-XXXX-XXXX",
+  "familyCodeAction": "Enter as family",
+
+  "myFamilyTitle": "My family",
+  "myFamilyIntro": "Your family's records, dues and payments. Read only.",
+  "myMembersSection": "Family members",
+  "myStatementSection": "Statement",
+
+  "issueCodeTitle": "Family access code",
+  "issueCodeBody": "Give this code to the head of the family so he can sign in and see only his own family. Issuing a new one revokes the old.",
+  "issueCodeAction": "Issue access code",
+  "issueCodeRegenerate": "Issue a new code",
+  "issueCodeCopied": "Code copied",
 
   "dangerZoneSection": "Danger zone",
   "purgeTitle": "Erase financial data",

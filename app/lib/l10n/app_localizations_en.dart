@@ -88,6 +88,9 @@ class LEn extends L {
   String get close => 'Close';
 
   @override
+  String get copy => 'Copy';
+
+  @override
   String get loading => 'Loading...';
 
   @override
@@ -691,6 +694,51 @@ class LEn extends L {
 
   @override
   String get noChanges => 'No changes';
+
+  @override
+  String get familyCodeTitle => 'Have a family code?';
+
+  @override
+  String get familyCodeBody =>
+      'If an association officer gave you an access code for your family, type it here to see your family\'s own records.';
+
+  @override
+  String get familyCodeField => 'Family code';
+
+  @override
+  String get familyCodeHint => 'XXXX-XXXX-XXXX';
+
+  @override
+  String get familyCodeAction => 'Enter as family';
+
+  @override
+  String get myFamilyTitle => 'My family';
+
+  @override
+  String get myFamilyIntro =>
+      'Your family\'s records, dues and payments. Read only.';
+
+  @override
+  String get myMembersSection => 'Family members';
+
+  @override
+  String get myStatementSection => 'Statement';
+
+  @override
+  String get issueCodeTitle => 'Family access code';
+
+  @override
+  String get issueCodeBody =>
+      'Give this code to the head of the family so he can sign in and see only his own family. Issuing a new one revokes the old.';
+
+  @override
+  String get issueCodeAction => 'Issue access code';
+
+  @override
+  String get issueCodeRegenerate => 'Issue a new code';
+
+  @override
+  String get issueCodeCopied => 'Code copied';
 
   @override
   String get dangerZoneSection => 'Danger zone';

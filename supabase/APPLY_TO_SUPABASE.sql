@@ -110,6 +110,26 @@ $$;
 -- immutable while an email can be reassigned inside a Workspace domain; that
 -- reasoning now lives in auth.identities, which GoTrue maintains.
 
+-- family_id is the STAFF/FAMILY-HEAD DISCRIMINATOR, and it is deliberately a
+-- nullable column rather than a new app_role value.
+--
+--   NULL      → association staff. `role` means what it always meant.
+--   NOT NULL  → a head of family who redeemed an access code. He is not on the
+--               staff ladder at all: my_role() returns NULL for him, so every
+--               existing policy (all of which go through has_role) denies him,
+--               and the family-scoped policies added in 20260811090500 are the
+--               only ones that let him see anything.
+--
+-- Why not `ALTER TYPE app_role ADD VALUE 'familyHead'`: the new label cannot be
+-- USED in the transaction that adds it, and this schema is applied as one
+-- transaction (supabase/APPLY_TO_SUPABASE.sql). role_rank() would have to
+-- reference the label immediately and the apply would fail. A column has no such
+-- rule, and it also expresses the truth better — "which family" is data, not a
+-- rank.
+--
+-- ON DELETE CASCADE, not SET NULL: if the family is purged, the head's profile
+-- must not silently fall back to being staff. Cascade removes his profile
+-- outright, and auth.users keeps the identity so he can be re-issued a code.
 CREATE TABLE public.profiles (
   id            uuid        PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email         text        NOT NULL,
@@ -117,14 +137,22 @@ CREATE TABLE public.profiles (
   picture_url   text,
   role          app_role    NOT NULL DEFAULT 'viewer',
   status        app_status  NOT NULL DEFAULT 'pending',
+  family_id     bigint,
   approved_by   uuid        REFERENCES public.profiles(id) ON DELETE SET NULL,
   approved_at   timestamptz,
   last_login_at timestamptz,
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now(),
 
-  CONSTRAINT uq_profiles_email UNIQUE (email)
+  CONSTRAINT uq_profiles_email UNIQUE (email),
+  -- A family head is a viewer with a family. Any other combination would give
+  -- someone both a staff rank and a family scope, and my_role() would silently
+  -- pick one — so it is refused outright instead.
+  CONSTRAINT ck_profiles_family_head
+    CHECK (family_id IS NULL OR role = 'viewer')
 );
+
+CREATE INDEX ix_profiles_family ON public.profiles (family_id);
 
 CREATE INDEX ix_profiles_status ON public.profiles (status, role);
 
@@ -162,13 +190,44 @@ CREATE TRIGGER trg_auth_user_created
 -- app layer they have to be here or they do not exist.
 CREATE OR REPLACE FUNCTION public.guard_profile_change() RETURNS trigger
 LANGUAGE plpgsql AS $$
+DECLARE
+  -- Redeeming an access code is the ONE self-change that has to be allowed:
+  -- pending → approved, performed by the caller on his own row, inside
+  -- redeem_family_code(). It is recognisable precisely because the row is
+  -- ACQUIRING a family binding at the same moment, and it grants nothing — the
+  -- role stays 'viewer', and my_role() returns NULL for anyone holding a
+  -- family_id, so the account ends up with strictly less reach than before.
+  --
+  -- NULL → NOT NULL only. Moving between families is still refused below.
+  v_redeeming boolean := OLD.family_id IS NULL
+                     AND NEW.family_id IS NOT NULL
+                     AND OLD.role = 'viewer'
+                     AND NEW.role = 'viewer';
 BEGIN
   -- Self-elevation. current_user is postgres/service_role during seeding and
   -- migrations, where this guard must not apply.
   IF auth.uid() IS NOT NULL AND NEW.id = auth.uid()
+     AND NOT v_redeeming
      AND (NEW.role IS DISTINCT FROM OLD.role
           OR NEW.status IS DISTINCT FROM OLD.status) THEN
     RAISE EXCEPTION 'FORBIDDEN: cannot change your own role or status'
+      USING ERRCODE = 'RUL00';
+  END IF;
+
+  -- family_id is only PARTLY exempt from the self-change rule above. Acquiring a
+  -- binding is a self-change and is the whole point of redeem_family_code(), so
+  -- NULL → a family has to be allowed. Changing one you already have must not
+  -- be: that is a head of family moving himself into another household, or out
+  -- of the family scope and back onto the staff ladder.
+  --
+  -- Scoped to `NEW.id = auth.uid()` deliberately. An ADMIN must still be able to
+  -- correct a mis-binding — someone who redeemed the wrong code, or a household
+  -- that changed hands — and forbidding it outright would leave no way to do so
+  -- short of deleting the account and losing its sign-in history.
+  IF auth.uid() IS NOT NULL AND NEW.id = auth.uid()
+     AND OLD.family_id IS NOT NULL
+     AND NEW.family_id IS DISTINCT FROM OLD.family_id THEN
+    RAISE EXCEPTION 'FORBIDDEN: cannot change your own family binding'
       USING ERRCODE = 'RUL00';
   END IF;
 
@@ -191,12 +250,34 @@ CREATE TRIGGER trg_profiles_guard
 -- ── Role resolution ─────────────────────────────────────────────────────────
 -- Deferred from 20260811090000 because these read the table above.
 
--- NULL for an unauthenticated caller, a suspended account, or one still
--- pending approval — so `>=` comparisons against it are NULL, never true.
--- Fail-closed by construction rather than by remembering to check.
+-- NULL for an unauthenticated caller, a suspended account, one still pending
+-- approval, OR a head of family — so `>=` comparisons against it are NULL, never
+-- true. Fail-closed by construction rather than by remembering to check.
+--
+-- `family_id IS NULL` is what keeps the family-head feature from needing a single
+-- edit to any existing policy. Every staff policy in 20260811090500 reads
+-- has_role(...), has_role reads my_role, and my_role refuses to answer for a
+-- family head — so the eight policies that grant association-wide reads exclude
+-- him automatically, and cannot be forgotten one at a time.
 CREATE OR REPLACE FUNCTION public.my_role() RETURNS app_role
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, auth AS $$
   SELECT p.role
+    FROM public.profiles p
+   WHERE p.id = auth.uid()
+     AND p.status = 'approved'
+     AND p.family_id IS NULL
+$$;
+
+-- The family a head of family may see, and NULL for everyone else — including
+-- staff, so an admin cannot accidentally read through the family-scoped
+-- policies as though he were a member of some family.
+--
+-- SECURITY DEFINER for the same reason my_role() is: a policy ON profiles that
+-- selects FROM profiles re-enters its own policy and Postgres raises "infinite
+-- recursion detected in policy".
+CREATE OR REPLACE FUNCTION public.my_family_id() RETURNS bigint
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, auth AS $$
+  SELECT p.family_id
     FROM public.profiles p
    WHERE p.id = auth.uid()
      AND p.status = 'approved'
@@ -370,6 +451,59 @@ END $$;
 CREATE TRIGGER trg_members_dob
   BEFORE INSERT OR UPDATE ON public.members
   FOR EACH ROW EXECUTE FUNCTION public.guard_member_dob();
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- profiles.family_id → families.id
+--
+-- Declared here rather than on the column, because profiles is created one
+-- migration earlier than families and a REFERENCES clause cannot point forward.
+-- See the header of profiles for why the family-head discriminator is a column
+-- rather than a new app_role value.
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE public.profiles
+  ADD CONSTRAINT fk_profiles_family
+  FOREIGN KEY (family_id) REFERENCES public.families(id) ON DELETE CASCADE;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- family_access_codes — one code per family, the thing a head of family types
+-- once to bind his Google account to his own family and nothing else.
+--
+-- PRIMARY KEY (family_id): one live code per family. Re-issuing overwrites,
+-- which is what "regenerate" means and also what revokes the old code — there is
+-- no second row for the previous one to keep working from.
+--
+-- Re-issuing does NOT sign anybody out. The binding lives on profiles.family_id
+-- once redeemed; the code is only the thing that creates that binding. So an
+-- admin can regenerate freely without breaking a head of family who is already in.
+--
+-- THE CODE IS STORED IN PLAINTEXT, deliberately, and it is worth being explicit
+-- about the trade:
+--   * only an admin can read this table (RLS, 20260811090500), and only through
+--     an admin-gated function; anon and every other role get nothing;
+--   * the admin has to be able to re-read a code to resend it over WhatsApp. A
+--     hash would force "regenerate" every time the message is lost, which for a
+--     non-technical treasurer is a footgun, not a safeguard;
+--   * the code reaches the family head over WhatsApp anyway, so it already
+--     exists in plaintext somewhere far less protected than this table.
+-- What a hash WOULD buy is protection of old codes in a leaked backup. Against
+-- that: the codes grant read-only access to one family's own figures, and
+-- rotating every code is one button per family.
+--
+-- `code` is 12 characters from an unambiguous 32-letter alphabet ≈ 60 bits.
+-- Guessing one over HTTPS is not a threat worth rate-limiting for; guessing it
+-- offline buys the attacker one family's balance.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE public.family_access_codes (
+  family_id   bigint      PRIMARY KEY REFERENCES public.families(id) ON DELETE CASCADE,
+  code        text        NOT NULL,
+  issued_at   timestamptz NOT NULL DEFAULT now(),
+  issued_by   uuid        REFERENCES public.profiles(id) ON DELETE SET NULL,
+  redeemed_at timestamptz,
+  redeemed_by uuid        REFERENCES public.profiles(id) ON DELETE SET NULL,
+
+  CONSTRAINT uq_family_code UNIQUE (code),
+  CONSTRAINT ck_family_code_len CHECK (char_length(code) BETWEEN 8 AND 64)
+);
 
 
 -- ==========================================================================
@@ -790,6 +924,77 @@ GRANT SELECT ON public.profiles TO authenticated;
 CREATE POLICY read_own_profile ON public.profiles
   FOR SELECT TO authenticated USING (id = auth.uid());
 CREATE POLICY read_all_profiles ON public.profiles
+  FOR SELECT TO authenticated USING (public.has_role('admin'));
+
+-- ── The family portal: a head of family sees his OWN family, and nothing else ─
+--
+-- A second, narrower way in. Everything above answers "is the caller staff?"
+-- through has_role(); everything here answers "which family is the caller the
+-- head of?" through my_family_id(). The two are mutually exclusive by
+-- construction, because my_role() returns NULL as soon as profiles.family_id is
+-- set — so a head of family fails every policy above without any of them being
+-- edited, and staff get NULL from my_family_id() so they never match a policy
+-- below.
+--
+-- Postgres ORs multiple permissive policies on the same command, which is
+-- exactly right here: a row is visible if the caller is staff OR it belongs to
+-- the caller's family. Neither policy has to know the other exists.
+--
+-- READ ONLY, and that is the whole feature. There is no INSERT/UPDATE/DELETE
+-- policy for a family head any more than there is for an admin — collection
+-- stays with the treasurer, through register_payment(), which begins with
+-- require_role('treasurer') and therefore refuses a head of family outright.
+--
+-- The two link tables are scoped through their parent rather than by a column of
+-- their own: receivable_lines has no family_id, and payment_allocations has
+-- none either. Scoping them by EXISTS against the parent means they cannot drift
+-- out of step with the receivable or payment they belong to.
+
+CREATE POLICY read_own_family ON public.families
+  FOR SELECT TO authenticated USING (id = public.my_family_id());
+
+CREATE POLICY read_own_members ON public.members
+  FOR SELECT TO authenticated USING (family_id = public.my_family_id());
+
+CREATE POLICY read_own_receivables ON public.receivables
+  FOR SELECT TO authenticated USING (family_id = public.my_family_id());
+
+CREATE POLICY read_own_receivable_lines ON public.receivable_lines
+  FOR SELECT TO authenticated USING (
+    EXISTS (SELECT 1 FROM public.receivables r
+             WHERE r.id = receivable_lines.receivable_id
+               AND r.family_id = public.my_family_id()));
+
+CREATE POLICY read_own_payments ON public.payments
+  FOR SELECT TO authenticated USING (family_id = public.my_family_id());
+
+CREATE POLICY read_own_allocations ON public.payment_allocations
+  FOR SELECT TO authenticated USING (
+    EXISTS (SELECT 1 FROM public.payments p
+             WHERE p.id = payment_allocations.payment_id
+               AND p.family_id = public.my_family_id()));
+
+CREATE POLICY read_own_cash ON public.cash_movements
+  FOR SELECT TO authenticated USING (family_id = public.my_family_id());
+
+-- The association's name, currency and monthly fees. He is being billed by these
+-- figures, so withholding them would make his own statement unreadable. The
+-- officials' names and phones travel with them, which is intended — that is who
+-- he pays.
+CREATE POLICY read_settings_family ON public.association_settings
+  FOR SELECT TO authenticated USING (public.my_family_id() IS NOT NULL);
+
+-- Deliberately NOT extended to a family head: audit_log (it names other people's
+-- transactions), profiles beyond his own row (read_own_profile already covers
+-- that), and family_access_codes (below).
+
+-- ── family_access_codes: admins only, and only through the RPCs ──────────────
+-- No SELECT for anyone but an admin. A head of family must never be able to read
+-- his own row, let alone anyone else's: the code is the credential, and the
+-- table holds every family's in plaintext (see the table's header for why).
+ALTER TABLE public.family_access_codes ENABLE ROW LEVEL SECURITY;
+GRANT SELECT ON public.family_access_codes TO authenticated;
+CREATE POLICY read_family_codes ON public.family_access_codes
   FOR SELECT TO authenticated USING (public.has_role('admin'));
 
 -- Deliberately absent: any INSERT, UPDATE or DELETE policy on any table.
@@ -1489,15 +1694,40 @@ BEGIN
   SELECT count(*) INTO v_fam    FROM public.families;
   SELECT count(*) INTO v_mem    FROM public.members;
 
+  -- ── Why families and members are DELETEd while the six financial tables are
+  -- TRUNCATEd ────────────────────────────────────────────────────────────────
+  -- profiles.family_id references families, and TRUNCATE refuses whenever ANY
+  -- table outside its list carries a foreign key into one being truncated —
+  -- the constraint's existence is what it checks, not whether rows remain. So
+  -- emptying profiles first does not help: it still dies with 0A000 "cannot
+  -- truncate a table referenced in a foreign key constraint". Listing profiles
+  -- would delete the association's own staff accounts, and CASCADE would do the
+  -- same silently.
+  --
+  -- DELETE has no such rule, and neither families nor members carries a
+  -- refuse_delete trigger — that guard is on the five financial tables, which
+  -- keep their TRUNCATE. The identities are then restarted by hand, because
+  -- that is the part RESTART IDENTITY was doing and the reason the next family
+  -- must be F-0001.
+  --
+  -- Heads of family go first and go entirely: their family is being erased, so
+  -- leaving the profile would leave a dangling scope. auth.users survives, so
+  -- the same person can sign in again and redeem a fresh code later.
+  DELETE FROM public.profiles WHERE family_id IS NOT NULL;
+
   TRUNCATE public.payment_allocations,
            public.cash_movements,
            public.payments,
            public.receivable_lines,
            public.receivables,
-           public.audit_log,
-           public.members,
-           public.families
+           public.audit_log
     RESTART IDENTITY;
+
+  DELETE FROM public.members;
+  DELETE FROM public.families;
+
+  ALTER TABLE public.members  ALTER COLUMN id RESTART WITH 1;
+  ALTER TABLE public.families ALTER COLUMN id RESTART WITH 1;
 
   RETURN jsonb_build_object(
     'receivables',     v_recv,
@@ -1508,6 +1738,141 @@ BEGIN
     'auditEntries',    v_audit,
     'families',        v_fam,
     'members',         v_mem);
+END $$;
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- The family portal — issuing and redeeming an access code.
+--
+-- Two functions, and the split between them is the security boundary: an admin
+-- CREATES a code for a family, and the head of family REDEEMS it for himself.
+-- Nobody can do both halves, and no client ever writes profiles.family_id
+-- directly — `authenticated` holds no UPDATE on profiles at all.
+-- ═════════════════════════════════════════════════════════════════════════════
+
+-- Endpoint: POST /families/:id/access-code.  Generates, or regenerates.
+--
+-- Regenerating REVOKES the previous code (one row per family, overwritten) but
+-- does NOT sign out a head of family who already redeemed it: the binding lives
+-- on profiles.family_id from that moment on. So an admin can reissue freely when
+-- a WhatsApp message is lost, without breaking anybody.
+--
+-- The alphabet omits 0/O/1/I/L/U — the pairs a person mis-reads off a phone
+-- screen, and U so no random draw can spell something unfortunate. 27 letters,
+-- 12 characters, ~57 bits: not guessable over HTTPS, and readable aloud.
+CREATE OR REPLACE FUNCTION public.issue_family_code(p_family_id bigint)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth AS $$
+DECLARE
+  v_alphabet CONSTANT text := '23456789ABCDEFGHJKMNPQRSTVWXYZ';
+  v_code text := '';
+  v_code_fmt text;
+  v_family record;
+  i int;
+BEGIN
+  PERFORM public.require_role('admin');
+
+  SELECT id, family_code INTO v_family FROM public.families WHERE id = p_family_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'FAMILY_NOT_FOUND' USING ERRCODE = 'RUL14';
+  END IF;
+
+  FOR i IN 1..12 LOOP
+    -- random() is not cryptographic. It does not need to be: the row is written
+    -- under a UNIQUE constraint, the code is delivered out of band, and the
+    -- worst case for a predicted code is read-only sight of one family's own
+    -- figures. gen_random_bytes would drag in pgcrypto for that.
+    v_code := v_code || substr(v_alphabet, 1 + floor(random() * length(v_alphabet))::int, 1);
+  END LOOP;
+
+  -- Grouped for reading aloud. redeem_family_code strips the dashes back out,
+  -- so what the admin sees and what the head of family types are the same thing.
+  v_code_fmt := substr(v_code,1,4) || '-' || substr(v_code,5,4) || '-' || substr(v_code,9,4);
+
+  INSERT INTO public.family_access_codes (family_id, code, issued_by)
+  VALUES (p_family_id, v_code, auth.uid())
+  ON CONFLICT (family_id) DO UPDATE SET
+    code = excluded.code, issued_at = now(), issued_by = excluded.issued_by,
+    -- Cleared: this is a NEW code, and it has not been redeemed.
+    redeemed_at = NULL, redeemed_by = NULL;
+
+  PERFORM public.write_audit('family.code.issue',
+    format('إصدار رمز دخول للعائلة %s', v_family.family_code), v_family.family_code);
+
+  RETURN jsonb_build_object(
+    'familyId', p_family_id, 'familyCode', v_family.family_code, 'code', v_code_fmt);
+END $$;
+
+-- Endpoint: POST /access-code/redeem.  Called by the head of family himself,
+-- once, right after he signs in with Google.
+--
+-- Binds his profile to the family and approves him. From then on my_role()
+-- returns NULL for him and my_family_id() returns the family, so the RLS
+-- policies in 20260811090500 decide everything he can see — this function is
+-- never consulted again.
+--
+-- It refuses anyone who is already staff. Without that check an admin who typed
+-- a code would set his own family_id, my_role() would start returning NULL, and
+-- he would lock himself out of the association's own app — possibly as the last
+-- admin, which no other guard would catch because his role never changed.
+CREATE OR REPLACE FUNCTION public.redeem_family_code(p_code text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth AS $$
+DECLARE
+  v_norm   text;
+  v_row    record;
+  v_me     record;
+  v_family record;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'يجب تسجيل الدخول أولاً' USING ERRCODE = 'RUL14';
+  END IF;
+
+  SELECT * INTO v_me FROM public.profiles WHERE id = auth.uid();
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'PROFILE_NOT_FOUND' USING ERRCODE = 'RUL14';
+  END IF;
+
+  IF v_me.role <> 'viewer' THEN
+    RAISE EXCEPTION 'هذا الحساب حساب إداري ولا يمكن ربطه بعائلة'
+      USING ERRCODE = 'RUL14';
+  END IF;
+
+  -- Typed by a person off a phone screen: dashes, spaces and lower case are all
+  -- expected and none of them are part of the code.
+  v_norm := upper(regexp_replace(coalesce(p_code, ''), '[^0-9A-Za-z]', '', 'g'));
+
+  SELECT * INTO v_row FROM public.family_access_codes WHERE code = v_norm;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'رمز الدخول غير صحيح' USING ERRCODE = 'RUL14';
+  END IF;
+
+  -- One code, one household. A second person redeeming the same code would get
+  -- his own read-only view of the same family — which is a decision for the
+  -- admin to make by reissuing, not something a forwarded WhatsApp message
+  -- should be able to do.
+  IF v_row.redeemed_at IS NOT NULL AND v_row.redeemed_by IS DISTINCT FROM auth.uid() THEN
+    RAISE EXCEPTION 'هذا الرمز مستعمل بالفعل، اطلب رمزاً جديداً'
+      USING ERRCODE = 'RUL14';
+  END IF;
+
+  UPDATE public.profiles
+     SET family_id = v_row.family_id,
+         status    = 'approved',
+         role      = 'viewer'
+   WHERE id = auth.uid();
+
+  UPDATE public.family_access_codes
+     SET redeemed_at = now(), redeemed_by = auth.uid()
+   WHERE family_id = v_row.family_id;
+
+  SELECT family_code INTO v_family FROM public.families WHERE id = v_row.family_id;
+
+  PERFORM public.write_audit('family.code.redeem',
+    format('ربط حساب %s بالعائلة %s', v_me.email, v_family.family_code),
+    v_family.family_code);
+
+  RETURN jsonb_build_object(
+    'familyId', v_row.family_id, 'familyCode', v_family.family_code);
 END $$;
 
 -- ── Execution grants ─────────────────────────────────────────────────────────
@@ -1522,7 +1887,9 @@ GRANT EXECUTE ON FUNCTION
   public.update_settings(jsonb),
   public.set_user_access(uuid, app_role, app_status),
   public.purge_financial_data(text),
-  public.purge_all_data(text)
+  public.purge_all_data(text),
+  public.issue_family_code(bigint),
+  public.redeem_family_code(text)
 TO authenticated;
 
 -- write_audit is NOT granted: it is an internal helper. Exposing it would let
@@ -2176,9 +2543,14 @@ SELECT
   p.status::text        AS "status",
   to_char(p.last_login_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                         AS "lastLoginAt",
-  approver.display_name AS "approvedByName"
+  approver.display_name AS "approvedByName",
+  -- NULL for staff. Non-NULL marks a head of family, who stores `viewer` in
+  -- `role` and would otherwise be indistinguishable on the users screen from a
+  -- real viewer — while actually seeing far less, and something different.
+  fam.family_code       AS "familyCode"
 FROM public.profiles p
-LEFT JOIN public.profiles approver ON approver.id = p.approved_by;
+LEFT JOIN public.profiles approver ON approver.id = p.approved_by
+LEFT JOIN public.families fam ON fam.id = p.family_id;
 
 GRANT SELECT ON
   public.v_member_status, public.v_settings, public.v_officials,
@@ -2501,6 +2873,10 @@ $$;
 -- Readable by a pending or suspended account, because the app has to be able to
 -- render "awaiting approval" for exactly those users. Reads through the
 -- read_own_profile policy, not around it.
+-- `familyId` is what makes the app branch. NULL means association staff and the
+-- normal interface; non-NULL means a head of family, and the router sends him to
+-- the family portal instead. It is the same column my_role() consults, so the
+-- screen he gets and the rows RLS will give him can never disagree.
 CREATE OR REPLACE FUNCTION public.api_me() RETURNS jsonb
 LANGUAGE sql STABLE AS $$
   SELECT jsonb_build_object(
@@ -2509,7 +2885,9 @@ LANGUAGE sql STABLE AS $$
     'displayName', p.display_name,
     'pictureUrl', p.picture_url,
     'role', p.role::text,
-    'status', p.status::text)
+    'status', p.status::text,
+    'familyId', p.family_id,
+    'familyCode', (SELECT f.family_code FROM public.families f WHERE f.id = p.family_id))
   FROM public.profiles p WHERE p.id = auth.uid()
 $$;
 
@@ -2634,8 +3012,14 @@ RETURNS text[] LANGUAGE sql IMMUTABLE AS $$
     'role_rank(app_role)',
     'my_role()',
     'has_role(app_role)',
+    -- Answers only for the caller's own family binding, and the family-scoped
+    -- policies call it, so the caller whose policy is being evaluated must hold
+    -- EXECUTE — otherwise every one of those policies ERRORS instead of denying,
+    -- and the failure surfaces as "permission denied for function my_family_id"
+    -- on screens that have nothing to do with the family portal.
+    'my_family_id()',
 
-    -- Writes. Nine functions, each require_role()-gated, each one transaction.
+    -- Writes. Eleven functions, each require_role()-gated, each one transaction.
     'register_payment(bigint,numeric,pay_method,text,text,text)',
     'cancel_payment(bigint,text)',
     'generate_period(character)',
@@ -2650,6 +3034,13 @@ RETURNS text[] LANGUAGE sql IMMUTABLE AS $$
     -- inside the body, not in who can reach it.
     'purge_financial_data(text)',
     'purge_all_data(text)',
+
+    -- The family portal. issue_ is admin-gated; redeem_ deliberately is NOT —
+    -- it is the one write a signed-in stranger may call, because until he
+    -- redeems a code he has no role and no family, and the code itself is the
+    -- authorisation. It refuses anyone who is already staff.
+    'issue_family_code(bigint)',
+    'redeem_family_code(text)',
 
     -- Reads. STABLE and SECURITY INVOKER, so RLS still decides what they return.
     'period_label(text)',
@@ -2837,9 +3228,10 @@ BEGIN
    WHERE schemaname = 'public'
      AND tablename IN ('profiles','association_settings','families','members',
                        'receivables','receivable_lines','payments',
-                       'payment_allocations','cash_movements','audit_log');
-  IF v_tables <> 10 THEN
-    RAISE EXCEPTION 'expected 10 tables, found %', v_tables;
+                       'payment_allocations','cash_movements','audit_log',
+                       'family_access_codes');
+  IF v_tables <> 11 THEN
+    RAISE EXCEPTION 'expected 11 tables, found %', v_tables;
   END IF;
 
   SELECT count(*) INTO v_views FROM pg_views
@@ -2854,11 +3246,12 @@ BEGIN
      AND p.proname IN ('register_payment','cancel_payment','generate_period',
                        'auto_close_periods','save_family','update_settings',
                        'set_user_access','purge_financial_data','purge_all_data',
+                       'issue_family_code','redeem_family_code','my_family_id',
                        'api_dashboard','api_family_detail','api_family_statement',
                        'api_receivables','api_alerts','api_financial_report',
                        'api_settings','api_me');
-  IF v_funcs <> 17 THEN
-    RAISE EXCEPTION 'expected 17 API functions, found %', v_funcs;
+  IF v_funcs <> 20 THEN
+    RAISE EXCEPTION 'expected 20 API functions, found %', v_funcs;
   END IF;
 
   -- Every table must have RLS ON. A table without it is readable by anyone

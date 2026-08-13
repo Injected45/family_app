@@ -105,6 +105,34 @@ Feature-first. Each feature under `features/<name>/` has `data/` (repository),
 (`features/auth/domain/app_user.dart`); unknown roles fall back to `viewer`. Hiding a
 button is presentation — the same check is always re-enforced server-side.
 
+**The family portal is a second, disjoint way in.** A head of family signs in with
+Google, types the access code an admin issued him, and thereafter sees his own
+family's members, dues, receipts and statement — read-only, nothing of the
+association's. The discriminator is `profiles.family_id`, deliberately a column
+rather than a new `app_role` value (`ALTER TYPE … ADD VALUE` cannot be used in the
+transaction that adds it, and the schema applies as one transaction).
+
+The whole separation rests on one clause: **`my_role()` returns NULL once
+`family_id` is set.** Every staff policy goes through `has_role()`, so a head of
+family is excluded from all eight without any of them being edited; and
+`my_family_id()` is NULL for staff, so they never match the seven family-scoped
+policies. Both directions are asserted in `supabase/tests/45_family_portal.sql`
+— they are silent failure modes, not visible ones.
+
+`issue_family_code(bigint)` is admin-only and overwrites (one row per family, so
+regenerating revokes the old code without signing out anyone already bound).
+`redeem_family_code(text)` is the one write a signed-in stranger may call: until
+he redeems, he has no role and no family, so the code IS the authorisation. It
+refuses anyone already on the staff ladder — an admin who redeemed would set his
+own `family_id`, lose `my_role()`, and lock himself out with no other guard
+noticing. In Dart, `AppUser.isFamilyHead` pins him to `/my-family` in the router
+guard; `FamilyPortalScreen` reuses `api_family_detail` / `api_family_statement`
+rather than adding portal-only endpoints, because those are SECURITY INVOKER and
+RLS already scopes them.
+
+**Google sign-in must be enabled in the Supabase dashboard** for any of this to
+work — the dev email/password login is a staff-only convenience.
+
 ## Commands (run from `app/` unless noted)
 
 ```bash
