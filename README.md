@@ -73,7 +73,7 @@ Nothing here is asserted without an executable check.
 ```bash
 bash supabase/tests/local_pg.sh start      # provisions a local PostgreSQL
 bash supabase/tests/probe.sh               # 257 checks
-python supabase/tests/verify_live.py <pw>  # over HTTPS; SEE THE WARNING BELOW
+python supabase/tests/verify_live.py <pw>  # 58 checks over HTTPS; SEE BELOW
 cd app && flutter test                     # 121 tests
 cd app && dart run tool/rtl_lint.dart
 cd app && dart run tool/supabase_lint.dart

@@ -141,6 +141,19 @@ if len(fams) != 1 and '--reset' not in sys.argv:
           % len(fams))
     sys.exit(1)
 
+# The fees have to be set, not assumed. They were assumed, and the project's
+# fatherFee had since been changed from 20.00 to 10.00 through the app — so
+# generate_period correctly billed 10 + 10 and the suite reported a 40.00 debt
+# where it wanted 60.00. Nothing was broken except the expectation.
+#
+# eligibilityAge matters just as much: it decides whether the 2005-born son is
+# billed at all, and 'one of two sons is eligible' below depends on it.
+status, body = rpc('update_settings', {'p_patch': {
+    'fatherFee': '20.00', 'sonFee': '10.00', 'eligibilityAge': 15}}, JWT)
+check('fees pinned to 20.00 father / 10.00 son',
+      status == 200 and body.get('fatherFee') == '20.00'
+      and body.get('sonFee') == '10.00', body)
+
 status, body = rpc('purge_financial_data', {'p_confirm': 'مسح نهائي'}, JWT)
 check('financial data cleared', status == 200, body)
 
