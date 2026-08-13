@@ -63,6 +63,14 @@ $SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 $DEV_EMAIL = 'admin@fam.test'
 $DEV_PASS  = 'Fam-Dev-m6sG8tBTWs1'
 
+# The WEB client ID from Google Cloud - the SAME one entered in Supabase's Google
+# provider. Required on Android too: without it a token verifies on the device
+# and is then rejected by Supabase, which looks like a Google failure and is not.
+# NOT a secret; it ships in every app offering Google sign-in. The client SECRET
+# is a different string and belongs only in the Supabase dashboard.
+# Empty => the app hides the Google button rather than offering a broken one.
+$GOOGLE_SERVER_CLIENT_ID = ''
+
 function Say($m) { Write-Host "  $m" }
 
 # ---- Locate the SDK -------------------------------------------------------
@@ -166,12 +174,20 @@ if ($Build -or -not (Test-Path $apk)) {
   Say "building $mode APK (a clean release build takes a few minutes)"
   Push-Location (Join-Path $root 'app')
   try {
-    & flutter build apk "--$mode" `
-      "--dart-define=SUPABASE_URL=$SUPABASE_URL" `
-      "--dart-define=SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" `
-      '--dart-define=DEV_LOGIN=true' `
-      "--dart-define=DEV_LOGIN_EMAIL=$DEV_EMAIL" `
+    $defines = @(
+      "--dart-define=SUPABASE_URL=$SUPABASE_URL",
+      "--dart-define=SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY",
+      '--dart-define=DEV_LOGIN=true',
+      "--dart-define=DEV_LOGIN_EMAIL=$DEV_EMAIL",
       "--dart-define=DEV_LOGIN_PASSWORD=$DEV_PASS"
+    )
+    if (-not [string]::IsNullOrEmpty($GOOGLE_SERVER_CLIENT_ID)) {
+      $defines += "--dart-define=GOOGLE_SERVER_CLIENT_ID=$GOOGLE_SERVER_CLIENT_ID"
+      Say 'google sign-in: configured'
+    } else {
+      Say 'google sign-in: NOT configured - the Google button will be hidden'
+    }
+    & flutter build apk "--$mode" @defines
     if ($LASTEXITCODE -ne 0) { throw "flutter build apk exited with $LASTEXITCODE" }
   } finally { Pop-Location }
 }

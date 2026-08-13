@@ -46,6 +46,23 @@ REM so the app is usable before the Google provider is switched on.
 set "DEV_LOGIN_EMAIL=admin@fam.test"
 set "DEV_LOGIN_PASSWORD=Fam-Dev-m6sG8tBTWs1"
 
+REM ---- Google sign-in --------------------------------------------------------
+REM Fill GOOGLE_SERVER_CLIENT_ID with the WEB client ID from Google Cloud - the
+REM SAME one entered in Supabase's Google provider. It is called "server" because
+REM it names the backend the ID token is destined for, and it is required on
+REM Android too: without it a token verifies on the device and is then rejected
+REM by Supabase, which looks like a Google failure and is not one.
+REM
+REM NOT a secret. It ships inside every app that offers Google sign-in, exactly
+REM like the anon key above. The client SECRET is a different string and must
+REM NEVER appear in this file - it belongs only in the Supabase dashboard.
+REM
+REM Leave it empty and the app hides the Google button rather than offering one
+REM that cannot work. Android needs no GOOGLE_CLIENT_ID: it is derived from the
+REM signing certificate registered in the Google Cloud console.
+set "GOOGLE_SERVER_CLIENT_ID="
+set "GOOGLE_CLIENT_ID="
+
 set "MODE=--release"
 set "MODENAME=release"
 set "SPLIT="
@@ -103,11 +120,25 @@ if defined DEVLOGIN (
   set "DEVNOTE=omitted - sign-in needs the Google provider enabled"
 )
 
+REM Only passed when set. An empty --dart-define would still make
+REM AppConfig.isGoogleConfigured false, but passing nothing keeps the command
+REM line honest about what this build actually carries.
+if defined GOOGLE_SERVER_CLIENT_ID (
+  set "DEFINES=!DEFINES! --dart-define=GOOGLE_SERVER_CLIENT_ID=%GOOGLE_SERVER_CLIENT_ID%"
+  set "GNOTE=configured"
+) else (
+  set "GNOTE=NOT configured - the Google button will be hidden"
+)
+if defined GOOGLE_CLIENT_ID (
+  set "DEFINES=!DEFINES! --dart-define=GOOGLE_CLIENT_ID=%GOOGLE_CLIENT_ID%"
+)
+
 echo.
 echo   ============================================================
 echo    build      apk (!MODENAME!) !SPLIT!
 echo    project    %SUPABASE_URL%
 echo    dev login  !DEVNOTE!
+echo    google     !GNOTE!
 echo   ============================================================
 echo.
 echo   Compiling. A clean release build can take a few minutes.
