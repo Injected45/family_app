@@ -22,7 +22,16 @@ if (hasSigningConfig) {
 
 android {
     namespace = "ly.rhalla.family_app"
-    compileSdk = flutter.compileSdkVersion
+    // Pinned rather than flutter.compileSdkVersion, which is 36 in Flutter 3.41.
+    // flutter_secure_storage compiles against 37 and the build FAILS outright,
+    // not with a warning — and it is not an optional dependency here: it is where
+    // the Supabase refresh token is kept, off the filesystem and in the Android
+    // keystore.
+    //
+    // Raising compileSdk only changes which SDK the code is COMPILED against;
+    // Android SDKs are backward compatible, and targetSdk/minSdk are untouched,
+    // so nothing about runtime behaviour or device support moves.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
