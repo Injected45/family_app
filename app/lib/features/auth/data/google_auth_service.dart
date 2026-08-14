@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../../core/config/app_config.dart';
@@ -79,7 +80,26 @@ class GoogleAuthService {
       await GoogleSignIn.instance.authenticate();
       return true;
     } on GoogleSignInException catch (error) {
-      if (error.code == GoogleSignInExceptionCode.canceled) return false;
+      if (error.code == GoogleSignInExceptionCode.canceled) {
+        // `canceled` does NOT only mean the user dismissed the picker. Google
+        // Play Services reports a REFUSAL the same way, and the app then says
+        // "تم إلغاء تسجيل الدخول" for what is actually a misconfiguration.
+        //
+        // Seen for real: an Internal consent screen refusing a personal Gmail
+        // with "This client is restricted to users within its organization."
+        // The chooser had appeared and an account had been picked, so it looked
+        // for all the world like a cancellation, and the true reason existed
+        // only in logcat under the Auth tag.
+        //
+        // `description` carries the reason when there is one. A genuine dismissal
+        // has none, so logging it costs nothing and turns the next occurrence
+        // into one console line instead of an adb session.
+        final String? why = error.description;
+        if (AppConfig.verbose && why != null && why.isNotEmpty) {
+          debugPrint('Google sign-in reported "canceled": $why');
+        }
+        return false;
+      }
       rethrow;
     }
   }
