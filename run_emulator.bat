@@ -150,8 +150,18 @@ if not defined AVD (
   REM update, so no AVD was ever chosen and this script wrongly reported that
   REM none existed. Anchor on a row that STARTS with an id token and lists the
   REM android platform, which also skips the header, blanks and the help URLs.
-  for /f "tokens=1" %%A in ('findstr /r /c:"^[A-Za-z0-9_].* android" "%AVDLIST%"') do (
-    if not defined AVD set "AVD=%%A"
+  REM Prefer this project's own AVD if it exists. The generic Medium_Phone AVD
+  REM sorts first and ships a 6 GB data partition, which a 151 MB Flutter DEBUG
+  REM apk fills - the install then dies with
+  REM   java.io.IOException: Requested internal only, but not enough space
+  REM which names neither the emulator nor the partition. Rahalla_Test_API36 has
+  REM 16 GB.
+  findstr /r /c:"^Rahalla_Test_API36 " "%AVDLIST%" >nul 2>&1
+  if not errorlevel 1 set "AVD=Rahalla_Test_API36"
+  if not defined AVD (
+    for /f "tokens=1" %%A in ('findstr /r /c:"^[A-Za-z0-9_].* android" "%AVDLIST%"') do (
+      if not defined AVD set "AVD=%%A"
+    )
   )
 )
 if not defined AVD (
@@ -201,6 +211,31 @@ if not defined DEVICE (
 REM ---- A cold-booted emulator often has no DNS for a few seconds ------------
 REM Checked because that failure is otherwise silent and looks like a bad key:
 REM the app starts, the sign-in button works, and every request times out.
+REM ---- Enough room to install? ----------------------------------------------
+REM A Flutter debug apk is ~150 MB and the installer needs roughly double that
+REM while it streams and optimises. Below ~500 MB free the install fails with an
+REM IOException that mentions neither the emulator nor the partition, so say it
+REM plainly here instead.
+set "FREEKB="
+"%ADB%" -s !DEVICE! shell df /data > "%TMPD%\df.txt" 2>nul
+for /f "skip=1 tokens=4" %%K in (%TMPD%\df.txt) do if not defined FREEKB set "FREEKB=%%K"
+if defined FREEKB (
+  set /a FREEMB=!FREEKB!/1024
+  if !FREEMB! LSS 500 (
+    echo.
+    echo   Only !FREEMB! MB free on the emulator - an install needs about 500 MB.
+    echo.
+    echo   Free some up:
+    echo     "%ADB%" shell pm uninstall ly.rhalla.family_app
+    echo     "%ADB%" shell pm trim-caches 999G
+    echo   Or run on the roomier AVD:
+    echo     run_emulator.bat Rahalla_Test_API36
+    echo   Or wipe it: Device Manager - the AVD's menu - Wipe Data.
+    exit /b 1
+  )
+  echo   Free space on the emulator: !FREEMB! MB
+)
+
 echo   Checking the emulator can reach Supabase...
 set /a NET=0
 :wait_net
